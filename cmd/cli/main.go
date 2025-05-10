@@ -2,6 +2,9 @@ package main
 
 import (
 	"cloudsave/cmd/cli/commands/add"
+	"cloudsave/cmd/cli/commands/list"
+	"cloudsave/cmd/cli/commands/remote"
+	"cloudsave/cmd/cli/commands/remove"
 	"cloudsave/cmd/cli/commands/run"
 	"context"
 	"flag"
@@ -15,8 +18,12 @@ func main() {
 	subcommands.Register(subcommands.FlagsCommand(), "help")
 	subcommands.Register(subcommands.CommandsCommand(), "help")
 
-	subcommands.Register(add.AddCmd{}, "management")
-	subcommands.Register(run.RunCmd{}, "management")
+	subcommands.Register(&add.AddCmd{}, "management")
+	subcommands.Register(&run.RunCmd{}, "management")
+	subcommands.Register(&list.ListCmd{}, "management")
+	subcommands.Register(&remove.RemoveCmd{}, "management")
+
+	subcommands.Register(&remote.RemoteCmd{}, "remote")
 
 	flag.Parse()
 	ctx := context.Background()

@@ -42,6 +42,11 @@ func Add(name, path string) (Metadata, error) {
 		Path: path,
 	}
 
+	err := os.MkdirAll(filepath.Join(datastorepath, m.ID), 0740)
+	if err != nil {
+		panic("cannot make directory for the game:" + err.Error())
+	}
+
 	f, err := os.OpenFile(filepath.Join(datastorepath, m.ID, "metadata.json"), os.O_CREATE|os.O_WRONLY, 0740)
 	if err != nil {
 		return Metadata{}, fmt.Errorf("cannot open the metadata file in the datastore: %w", err)
@@ -83,4 +88,12 @@ func All() ([]Metadata, error) {
 
 func DatastorePath() string {
 	return datastorepath
+}
+
+func Remove(gameID string) error {
+	err := os.RemoveAll(filepath.Join(datastorepath, gameID))
+	if err != nil {
+		return err
+	}
+	return nil
 }

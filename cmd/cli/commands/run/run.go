@@ -20,17 +20,17 @@ type (
 	}
 )
 
-func (RunCmd) Name() string     { return "run" }
-func (RunCmd) Synopsis() string { return "Check and process all the folder" }
-func (RunCmd) Usage() string {
+func (*RunCmd) Name() string     { return "run" }
+func (*RunCmd) Synopsis() string { return "Check and process all the folder" }
+func (*RunCmd) Usage() string {
 	return `run:
   Check and process all the folder
 `
 }
 
-func (p RunCmd) SetFlags(f *flag.FlagSet) {}
+func (p *RunCmd) SetFlags(f *flag.FlagSet) {}
 
-func (p RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
+func (p *RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
 	datastore, err := game.All()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load datastore:", err)
