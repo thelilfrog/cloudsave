@@ -39,7 +39,7 @@ func (p RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) su
 
 	for _, metadata := range datastore {
 		metadataPath := filepath.Join(game.DatastorePath(), metadata.ID)
-		err := archiveIfChanged(metadata.Path, filepath.Join(metadataPath, "data.tar.gz"), filepath.Join(metadataPath, ".last_run"))
+		err := archiveIfChanged(metadata.ID, metadata.Path, filepath.Join(metadataPath, "data.tar.gz"), filepath.Join(metadataPath, ".last_run"))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: cannot process the data of %s: %s\n", metadata.ID, err)
 			return subcommands.ExitFailure
@@ -52,7 +52,7 @@ func (p RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) su
 // archiveIfChanged will archive srcDir into destTarGz only if any file
 // in srcDir has a modification time > the last run time stored in stateFile.
 // After archiving, it updates stateFile to the current time.
-func archiveIfChanged(srcDir, destTarGz, stateFile string) error {
+func archiveIfChanged(id, srcDir, destTarGz, stateFile string) error {
 	// 1) Load last run time
 	var lastRun time.Time
 	data, err := os.ReadFile(stateFile)
@@ -83,7 +83,6 @@ func archiveIfChanged(srcDir, destTarGz, stateFile string) error {
 	}
 
 	if !changed {
-		fmt.Println("No changes detected; skipping archive.")
 		return nil
 	}
 
@@ -142,6 +141,7 @@ func archiveIfChanged(srcDir, destTarGz, stateFile string) error {
 		return fmt.Errorf("updating state file: %w", err)
 	}
 
-	fmt.Printf("Archived %q to %q and updated state file.\n", srcDir, destTarGz)
+	fmt.Println(id)
+
 	return nil
 }
