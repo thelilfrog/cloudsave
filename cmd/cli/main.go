@@ -6,6 +6,7 @@ import (
 	"cloudsave/cmd/cli/commands/remote"
 	"cloudsave/cmd/cli/commands/remove"
 	"cloudsave/cmd/cli/commands/run"
+	"cloudsave/cmd/cli/commands/sync"
 	"context"
 	"flag"
 	"os"
@@ -24,6 +25,7 @@ func main() {
 	subcommands.Register(&remove.RemoveCmd{}, "management")
 
 	subcommands.Register(&remote.RemoteCmd{}, "remote")
+	subcommands.Register(&sync.SyncCmd{}, "remote")
 
 	flag.Parse()
 	ctx := context.Background()
