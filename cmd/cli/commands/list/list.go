@@ -12,20 +12,18 @@ import (
 
 type (
 	ListCmd struct {
-		name string
 	}
 )
 
 func (*ListCmd) Name() string     { return "list" }
 func (*ListCmd) Synopsis() string { return "list all game registered" }
 func (*ListCmd) Usage() string {
-	return `add:
+	return `list:
   List all game registered
 `
 }
 
 func (p *ListCmd) SetFlags(f *flag.FlagSet) {
-	f.StringVar(&p.name, "name", "", "Override the name of the game")
 }
 
 func (p *ListCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {

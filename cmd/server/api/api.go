@@ -1,0 +1,181 @@
+package api
+
+import (
+	"cloudsave/pkg/game"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+)
+
+type (
+	HTTPServer struct {
+		Server       *http.Server
+		documentRoot string
+	}
+)
+
+// NewServer start the http server
+func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServer {
+	if !filepath.IsAbs(documentRoot) {
+		panic("the document root is not an absolute path")
+	}
+	s := &HTTPServer{
+		documentRoot: documentRoot,
+	}
+	router := chi.NewRouter()
+	router.NotFound(func(writer http.ResponseWriter, request *http.Request) {
+		notFound("This route does not exist", writer, request)
+	})
+	router.MethodNotAllowed(func(writer http.ResponseWriter, request *http.Request) {
+		methodNotAllowed(writer, request)
+	})
+	router.Use(middleware.Logger)
+	router.Use(recoverMiddleware)
+	router.Use(middleware.Compress(5, "application/gzip"))
+	router.Use(BasicAuth("cloudsave", creds))
+	router.Use(middleware.Heartbeat("/heartbeat"))
+	router.Route("/api", func(routerAPI chi.Router) {
+		routerAPI.Route("/v1", func(r chi.Router) {
+			// Get information about the server
+			r.Get("/version", s.Information)
+			// Secured routes
+			r.Group(func(secureRouter chi.Router) {
+				// Save files routes
+				secureRouter.Route("/games", func(gameRouter chi.Router) {
+					// List all available saves
+					gameRouter.Get("/", s.all)
+					// Data routes
+					gameRouter.Group(func(uploadRouter chi.Router) {
+						uploadRouter.Post("/{id}/data", s.upload)
+						uploadRouter.Get("/{id}/data", s.download)
+					})
+				})
+			})
+		})
+	})
+	s.Server = &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: router,
+	}
+	return s
+}
+
+func (s HTTPServer) all(w http.ResponseWriter, r *http.Request) {
+	ds, err := os.ReadDir(s.documentRoot)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
+		internalServerError(w, r)
+		return
+	}
+
+	datastore := make([]game.Metadata, 0)
+	for _, d := range ds {
+		content, err := os.ReadFile(filepath.Join(s.documentRoot, d.Name(), "metadata.json"))
+		if err != nil {
+			continue
+		}
+
+		var m game.Metadata
+		err = json.Unmarshal(content, &m)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "corrupted datastore: failed to parse %s/metadata.json: %s", d.Name(), err)
+			internalServerError(w, r)
+		}
+
+		datastore = append(datastore, m)
+	}
+
+	ok(datastore, w, r)
+}
+
+func (s HTTPServer) download(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id))
+
+	sdir, err := os.Stat(path)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+
+	if !sdir.IsDir() {
+		notFound("id not found", w, r)
+		return
+	}
+
+	path = filepath.Join(path, "data.tar.gz")
+
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+	defer f.Close()
+
+	// Get file info to set headers
+	fi, err := f.Stat()
+	if err != nil || fi.IsDir() {
+		internalServerError(w, r)
+		return
+	}
+
+	// Set headers
+	w.Header().Set("Content-Disposition", "attachment; filename=\"data.tar.gz\"")
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
+	w.WriteHeader(200)
+
+	// Stream the file content
+	http.ServeContent(w, r, "data.tar.gz", fi.ModTime(), f)
+}
+
+func (s HTTPServer) upload(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id, "data.tar.gz"))
+
+	// Limit max upload size (e.g., 500 MB)
+	r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
+
+	// Parse multipart form
+	err := r.ParseMultipartForm(500 << 20) // 500 MB
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to load payload:", err)
+		badRequest("bad payload", w, r)
+		return
+	}
+
+	// Retrieve file
+	file, _, err := r.FormFile("payload")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: cannot find payload in the form:", err)
+		badRequest("payload not found", w, r)
+		return
+	}
+	defer file.Close()
+
+	// Create destination file
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0640)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to open file:", err)
+		internalServerError(w, r)
+		return
+	}
+	defer f.Close()
+
+	// Copy the uploaded content to the file
+	if _, err := io.Copy(f, file); err != nil {
+		fmt.Fprintln(os.Stderr, "error: an error occured while downloading data:", err)
+		internalServerError(w, r)
+		return
+	}
+
+	// Respond success
+	w.WriteHeader(http.StatusCreated)
+}

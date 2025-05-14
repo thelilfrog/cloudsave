@@ -7,6 +7,7 @@ import (
 	"cloudsave/cmd/cli/commands/remove"
 	"cloudsave/cmd/cli/commands/run"
 	"cloudsave/cmd/cli/commands/sync"
+	"cloudsave/cmd/cli/commands/version"
 	"context"
 	"flag"
 	"os"
@@ -18,6 +19,7 @@ func main() {
 	subcommands.Register(subcommands.HelpCommand(), "help")
 	subcommands.Register(subcommands.FlagsCommand(), "help")
 	subcommands.Register(subcommands.CommandsCommand(), "help")
+	subcommands.Register(&version.VersionCmd{}, "help")
 
 	subcommands.Register(&add.AddCmd{}, "management")
 	subcommands.Register(&run.RunCmd{}, "management")
