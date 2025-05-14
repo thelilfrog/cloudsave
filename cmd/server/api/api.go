@@ -2,6 +2,7 @@ package api
 
 import (
 	"cloudsave/pkg/game"
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,13 +49,14 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 			// Secured routes
 			r.Group(func(secureRouter chi.Router) {
 				// Save files routes
-				secureRouter.Route("/games", func(gameRouter chi.Router) {
+				secureRouter.Route("/games", func(gamesRouter chi.Router) {
 					// List all available saves
-					gameRouter.Get("/", s.all)
+					gamesRouter.Get("/", s.all)
 					// Data routes
-					gameRouter.Group(func(uploadRouter chi.Router) {
-						uploadRouter.Post("/{id}/data", s.upload)
-						uploadRouter.Get("/{id}/data", s.download)
+					gamesRouter.Group(func(saveRouter chi.Router) {
+						saveRouter.Post("/{id}/data", s.upload)
+						saveRouter.Get("/{id}/data", s.download)
+						saveRouter.Get("/{id}/hash", s.hash)
 					})
 				})
 			})
@@ -178,4 +180,43 @@ func (s HTTPServer) upload(w http.ResponseWriter, r *http.Request) {
 
 	// Respond success
 	w.WriteHeader(http.StatusCreated)
+}
+
+func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id))
+
+	sdir, err := os.Stat(path)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+
+	if !sdir.IsDir() {
+		notFound("id not found", w, r)
+		return
+	}
+
+	path = filepath.Join(path, "data.tar.gz")
+
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+	defer f.Close()
+
+	// Create MD5 hasher
+	hasher := md5.New()
+
+	// Copy file content into hasher
+	if _, err := io.Copy(hasher, f); err != nil {
+		fmt.Fprintln(os.Stderr, "error: an error occured while reading data:", err)
+		internalServerError(w, r)
+		return
+	}
+
+	// Get checksum result
+	sum := hasher.Sum(nil)
+	ok(sum, w, r)
 }

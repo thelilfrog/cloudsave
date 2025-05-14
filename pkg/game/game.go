@@ -97,3 +97,10 @@ func Remove(gameID string) error {
 	}
 	return nil
 }
+
+func Hash(gameID string) (string, error) {
+	content, err := os.ReadFile(filepath.Join(datastorepath, d.Name(), "data.tar.gz"))
+	if err != nil {
+
+	}
+}
