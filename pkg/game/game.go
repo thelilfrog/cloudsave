@@ -2,17 +2,21 @@ package game
 
 import (
 	"cloudsave/pkg/tools/id"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
 
 type (
 	Metadata struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		Path string `json:"path"`
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Path    string `json:"path"`
+		Version int    `json:"version"`
 	}
 )
 
@@ -99,8 +103,66 @@ func Remove(gameID string) error {
 }
 
 func Hash(gameID string) (string, error) {
-	content, err := os.ReadFile(filepath.Join(datastorepath, d.Name(), "data.tar.gz"))
-	if err != nil {
+	path := filepath.Join(datastorepath, gameID, "data.tar.gz")
 
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return "", err
 	}
+	defer f.Close()
+
+	hasher := md5.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return "", err
+	}
+	sum := hasher.Sum(nil)
+	return hex.EncodeToString(sum), nil
+}
+
+func Version(gameID string) (int, error) {
+	path := filepath.Join(datastorepath, gameID, "metadata.json")
+
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	var metadata Metadata
+	d := json.NewDecoder(f)
+	err = d.Decode(&metadata)
+	if err != nil {
+		return 0, err
+	}
+
+	return metadata.Version, nil
+}
+
+func SetVersion(gameID string, version int) error {
+	path := filepath.Join(datastorepath, gameID, "metadata.json")
+
+	f, err := os.OpenFile(path, os.O_RDWR, 0740)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var metadata Metadata
+	d := json.NewDecoder(f)
+	err = d.Decode(&metadata)
+	if err != nil {
+		return err
+	}
+
+	f.Seek(0, io.SeekStart)
+
+	metadata.Version = version
+
+	e := json.NewEncoder(f)
+	err = e.Encode(metadata)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

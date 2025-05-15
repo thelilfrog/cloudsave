@@ -57,6 +57,7 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 						saveRouter.Post("/{id}/data", s.upload)
 						saveRouter.Get("/{id}/data", s.download)
 						saveRouter.Get("/{id}/hash", s.hash)
+						saveRouter.Get("/{id}/version", s.version)
 					})
 				})
 			})
@@ -219,4 +220,40 @@ func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
 	// Get checksum result
 	sum := hasher.Sum(nil)
 	ok(sum, w, r)
+}
+
+func (s HTTPServer) version(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id))
+
+	sdir, err := os.Stat(path)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+
+	if !sdir.IsDir() {
+		notFound("id not found", w, r)
+		return
+	}
+
+	path = filepath.Join(path, "metadata.json")
+
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+	defer f.Close()
+
+	var metadata game.Metadata
+	d := json.NewDecoder(f)
+	err = d.Decode(&metadata)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: an error occured while reading data:", err)
+		internalServerError(w, r)
+		return
+	}
+
+	ok(metadata.Version, w, r)
 }

@@ -1,34 +1,16 @@
 package api
 
 import (
+	"cloudsave/pkg/remote/obj"
 	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 )
 
-type (
-	httpCore struct {
-		Status    int       `json:"status"`
-		Timestamp time.Time `json:"timestamp"`
-		Path      string    `json:"path"`
-	}
-
-	httpError struct {
-		httpCore
-		Error   string `json:"error"`
-		Message string `json:"message"`
-	}
-
-	httpObject struct {
-		httpCore
-		Data any `json:"data"`
-	}
-)
-
 func internalServerError(w http.ResponseWriter, r *http.Request) {
-	e := httpError{
-		httpCore: httpCore{
+	e := obj.HTTPError{
+		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusInternalServerError,
 			Path:      r.RequestURI,
 			Timestamp: time.Now(),
@@ -50,8 +32,8 @@ func internalServerError(w http.ResponseWriter, r *http.Request) {
 }
 
 func notFound(message string, w http.ResponseWriter, r *http.Request) {
-	e := httpError{
-		httpCore: httpCore{
+	e := obj.HTTPError{
+		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusNotFound,
 			Path:      r.RequestURI,
 			Timestamp: time.Now(),
@@ -73,8 +55,8 @@ func notFound(message string, w http.ResponseWriter, r *http.Request) {
 }
 
 func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
-	e := httpError{
-		httpCore: httpCore{
+	e := obj.HTTPError{
+		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusMethodNotAllowed,
 			Path:      r.RequestURI,
 			Timestamp: time.Now(),
@@ -96,8 +78,8 @@ func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 }
 
 func unauthorized(w http.ResponseWriter, r *http.Request) {
-	e := httpError{
-		httpCore: httpCore{
+	e := obj.HTTPError{
+		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusUnauthorized,
 			Path:      r.RequestURI,
 			Timestamp: time.Now(),
@@ -120,8 +102,8 @@ func unauthorized(w http.ResponseWriter, r *http.Request) {
 }
 
 func forbidden(w http.ResponseWriter, r *http.Request) {
-	e := httpError{
-		httpCore: httpCore{
+	e := obj.HTTPError{
+		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusForbidden,
 			Path:      r.RequestURI,
 			Timestamp: time.Now(),
@@ -142,14 +124,14 @@ func forbidden(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func ok(obj interface{}, w http.ResponseWriter, r *http.Request) {
-	e := httpObject{
-		httpCore: httpCore{
+func ok(o interface{}, w http.ResponseWriter, r *http.Request) {
+	e := obj.HTTPObject{
+		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusOK,
 			Path:      r.RequestURI,
 			Timestamp: time.Now(),
 		},
-		Data: obj,
+		Data: o,
 	}
 
 	payload, err := json.Marshal(e)
@@ -164,8 +146,8 @@ func ok(obj interface{}, w http.ResponseWriter, r *http.Request) {
 }
 
 func badRequest(message string, w http.ResponseWriter, r *http.Request) {
-	e := httpError{
-		httpCore: httpCore{
+	e := obj.HTTPError{
+		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusBadRequest,
 			Path:      r.RequestURI,
 			Timestamp: time.Now(),
