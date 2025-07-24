@@ -9,9 +9,8 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"net/url"
 	"os"
+	"path/filepath"
 
 	"github.com/google/subcommands"
 )
@@ -39,6 +38,11 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		return subcommands.ExitFailure
 	}
 
+	if len(remotes) == 0 {
+		fmt.Println("nothing to do: no remote found")
+		return subcommands.ExitSuccess
+	}
+
 	username, password, err := credentials.Read()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to read std output:", err)
@@ -46,12 +50,18 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 	}
 
 	for _, r := range remotes {
-		if !ping(r.URL, username, password) {
-			slog.Warn("remote is unavailable", "url", r.URL)
-			continue
+		m, err := game.One(r.GameID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error: cannot get metadata for this game: %w", err)
+			return subcommands.ExitFailure
 		}
 
 		client := client.New(r.URL, username, password)
+
+		if !client.Ping() {
+			slog.Warn("remote is unavailable", "url", r.URL)
+			continue
+		}
 
 		hlocal, err := game.Hash(r.GameID)
 		if err != nil {
@@ -75,12 +85,18 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		}
 
 		if vremote == 0 {
-			fmt.Println("push")
+			if err := push(r.GameID, m, client); err != nil {
+				fmt.Fprintln(os.Stderr, "failed to push:", err)
+				return subcommands.ExitFailure
+			}
 			continue
 		}
 
 		if vlocal > vremote {
-			fmt.Println("push")
+			if err := push(r.GameID, m, client); err != nil {
+				fmt.Fprintln(os.Stderr, "failed to push:", err)
+				return subcommands.ExitFailure
+			}
 			continue
 		}
 
@@ -98,34 +114,8 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 	return subcommands.ExitSuccess
 }
 
-func ping(remote, username, password string) bool {
-	cli := http.Client{}
+func push(gameID string, m game.Metadata, cli *client.Client) error {
+	archivePath := filepath.Join(game.DatastorePath(), gameID, "data.tar.gz")
 
-	hburl, err := url.JoinPath(remote, "heartbeat")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "cannot connect to remote:", err)
-		return false
-	}
-
-	req, err := http.NewRequest("GET", hburl, nil)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "cannot connect to remote:", err)
-		return false
-	}
-
-	req.SetBasicAuth(username, password)
-
-	res, err := cli.Do(req)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "cannot connect to remote:", err)
-		return false
-	}
-
-	if res.StatusCode != http.StatusOK {
-		fmt.Fprintln(os.Stderr, "cannot connect to remote: server return code", res.StatusCode)
-		return false
-	}
-
-	return true
+	return cli.Push(gameID, archivePath, m)
 }
-

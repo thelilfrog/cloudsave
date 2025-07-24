@@ -90,6 +90,26 @@ func All() ([]Metadata, error) {
 	return datastore, nil
 }
 
+func One(gameID string) (Metadata, error) {
+	_, err := os.ReadDir(datastorepath)
+	if err != nil {
+		return Metadata{}, fmt.Errorf("cannot open the datastore: %w", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(datastorepath, gameID, "metadata.json"))
+	if err != nil {
+		return Metadata{}, fmt.Errorf("game not found: %w", err)
+	}
+
+	var m Metadata
+	err = json.Unmarshal(content, &m)
+	if err != nil {
+		return Metadata{}, fmt.Errorf("corrupted datastore: failed to parse %s/metadata.json: %w", gameID, err)
+	}
+
+	return m, nil
+}
+
 func DatastorePath() string {
 	return datastorepath
 }

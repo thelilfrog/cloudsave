@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cloudsave/cmd/server/data"
 	"cloudsave/pkg/game"
 	"crypto/md5"
 	"encoding/json"
@@ -140,17 +141,27 @@ func (s HTTPServer) download(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s HTTPServer) upload(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id, "data.tar.gz"))
+	const (
+		sizeLimit int64 = 500 << 20 // 500 MB
+	)
 
-	// Limit max upload size (e.g., 500 MB)
-	r.Body = http.MaxBytesReader(w, r.Body, 500<<20)
+	id := chi.URLParam(r, "id")
+
+	// Limit max upload size
+	r.Body = http.MaxBytesReader(w, r.Body, sizeLimit)
 
 	// Parse multipart form
-	err := r.ParseMultipartForm(500 << 20) // 500 MB
+	err := r.ParseMultipartForm(sizeLimit)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load payload:", err)
 		badRequest("bad payload", w, r)
+		return
+	}
+
+	m, err := parseFormMetadata(id, r.MultipartForm.Value)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: cannot find metadata in the form:", err)
+		badRequest("metadata not found", w, r)
 		return
 	}
 
@@ -163,18 +174,15 @@ func (s HTTPServer) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Create destination file
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0640)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: failed to open file:", err)
+	//TODO make a transaction
+	if err := data.UpdateMetadata(id, s.documentRoot, m); err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to write metadata to disk:", err)
 		internalServerError(w, r)
 		return
 	}
-	defer f.Close()
 
-	// Copy the uploaded content to the file
-	if _, err := io.Copy(f, file); err != nil {
-		fmt.Fprintln(os.Stderr, "error: an error occured while downloading data:", err)
+	if err := data.Write(id, s.documentRoot, file); err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to write file to disk:", err)
 		internalServerError(w, r)
 		return
 	}
@@ -256,4 +264,35 @@ func (s HTTPServer) version(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ok(metadata.Version, w, r)
+}
+
+func parseFormMetadata(gameID string, values map[string][]string) (game.Metadata, error) {
+	var name string
+	if v, ok := values["name"]; ok {
+		if len(v) != 0 {
+			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
+
+		}
+		name = v[0]
+	} else {
+		return game.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
+	}
+
+	var version int
+	if v, ok := values["version"]; ok {
+		if len(v) != 0 {
+			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
+		}
+		if v, err := strconv.Atoi(v[0]); err == nil {
+			version = v
+		}
+	} else {
+		return game.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
+	}
+
+	return game.Metadata{
+		ID:      gameID,
+		Version: version,
+		Name:    name,
+	}, nil
 }
