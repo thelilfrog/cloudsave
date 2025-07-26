@@ -69,7 +69,11 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
-		hremote, _ := client.Hash(r.GameID)
+		hremote, err := client.Hash(r.GameID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error: failed to get the file hash from the remote:", err)
+			continue
+		}
 
 		vlocal, err := game.Version(r.GameID)
 		if err != nil {
@@ -77,18 +81,21 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
-		vremote, _ := client.Version(r.GameID)
-
-		if hlocal == hremote {
-			fmt.Println("already up-to-date")
+		vremote, err := client.Version(r.GameID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error: failed to get the file version from the remote:", err)
 			continue
 		}
 
-		if vremote == 0 {
-			if err := push(r.GameID, m, client); err != nil {
-				fmt.Fprintln(os.Stderr, "failed to push:", err)
-				return subcommands.ExitFailure
+		if hlocal == hremote {
+			if vlocal != vremote {
+				slog.Debug("version is not the same, but the hash is equal. Updating local database")
+				if err := game.SetVersion(r.GameID, vremote); err != nil {
+					fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
+					continue
+				}
 			}
+			fmt.Println("already up-to-date")
 			continue
 		}
 
@@ -101,7 +108,14 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		}
 
 		if vlocal < vremote {
-			fmt.Println("pull")
+			if err := push(r.GameID, m, client); err != nil {
+				fmt.Fprintln(os.Stderr, "failed to push:", err)
+				return subcommands.ExitFailure
+			}
+			if err := game.SetVersion(r.GameID, vremote); err != nil {
+				fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
+				continue
+			}
 			continue
 		}
 
@@ -109,6 +123,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			fmt.Println("conflict")
 			continue
 		}
+
 	}
 
 	return subcommands.ExitSuccess
@@ -118,4 +133,10 @@ func push(gameID string, m game.Metadata, cli *client.Client) error {
 	archivePath := filepath.Join(game.DatastorePath(), gameID, "data.tar.gz")
 
 	return cli.Push(gameID, archivePath, m)
+}
+
+func pull(gameID string, cli *client.Client) error {
+	archivePath := filepath.Join(game.DatastorePath(), gameID, "data.tar.gz")
+
+	return cli.Pull(gameID, archivePath)
 }

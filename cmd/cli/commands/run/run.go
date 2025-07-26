@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/subcommands"
+	"github.com/schollz/progressbar/v3"
 )
 
 type (
@@ -37,14 +38,21 @@ func (p *RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 		return subcommands.ExitFailure
 	}
 
+	pg := progressbar.New(len(datastore))
+	defer pg.Close()
+
 	for _, metadata := range datastore {
+		pg.Describe("Scanning " + metadata.Name + "...")
 		metadataPath := filepath.Join(game.DatastorePath(), metadata.ID)
 		err := archiveIfChanged(metadata.ID, metadata.Path, filepath.Join(metadataPath, "data.tar.gz"), filepath.Join(metadataPath, ".last_run"))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: cannot process the data of %s: %s\n", metadata.ID, err)
 			return subcommands.ExitFailure
 		}
+		pg.Add(1)
 	}
+
+	pg.Finish()
 
 	return subcommands.ExitSuccess
 }
@@ -140,8 +148,6 @@ func archiveIfChanged(id, srcDir, destTarGz, stateFile string) error {
 	if err := os.WriteFile(stateFile, []byte(now), 0644); err != nil {
 		return fmt.Errorf("updating state file: %w", err)
 	}
-
-	fmt.Println(id)
 
 	return nil
 }

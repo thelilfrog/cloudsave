@@ -4,6 +4,7 @@ import (
 	"cloudsave/cmd/server/data"
 	"cloudsave/pkg/game"
 	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -227,7 +228,7 @@ func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
 
 	// Get checksum result
 	sum := hasher.Sum(nil)
-	ok(sum, w, r)
+	ok(hex.EncodeToString(sum), w, r)
 }
 
 func (s HTTPServer) version(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +270,7 @@ func (s HTTPServer) version(w http.ResponseWriter, r *http.Request) {
 func parseFormMetadata(gameID string, values map[string][]string) (game.Metadata, error) {
 	var name string
 	if v, ok := values["name"]; ok {
-		if len(v) != 0 {
+		if len(v) == 0 {
 			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
 
 		}
@@ -280,7 +281,7 @@ func parseFormMetadata(gameID string, values map[string][]string) (game.Metadata
 
 	var version int
 	if v, ok := values["version"]; ok {
-		if len(v) != 0 {
+		if len(v) == 0 {
 			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
 		}
 		if v, err := strconv.Atoi(v[0]); err == nil {

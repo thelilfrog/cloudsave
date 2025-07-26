@@ -14,7 +14,7 @@ func Write(gameID, documentRoot string, r io.Reader) error {
 	partPath := filepath.Join(dataFolderPath, "data.tar.gz.part")
 	finalFilePath := filepath.Join(dataFolderPath, "data.tar.gz")
 
-	if err := os.MkdirAll(dataFolderPath, 0740); err != nil {
+	if err := makeDataFolder(gameID, documentRoot); err != nil {
 		return err
 	}
 
@@ -40,6 +40,9 @@ func Write(gameID, documentRoot string, r io.Reader) error {
 }
 
 func UpdateMetadata(gameID, documentRoot string, m game.Metadata) error {
+	if err := makeDataFolder(gameID, documentRoot); err != nil {
+		return err
+	}
 	path := filepath.Join(documentRoot, "data", gameID, "metadata.json")
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0740)
@@ -50,4 +53,8 @@ func UpdateMetadata(gameID, documentRoot string, m game.Metadata) error {
 
 	e := json.NewEncoder(f)
 	return e.Encode(m)
+}
+
+func makeDataFolder(gameID, documentRoot string) error {
+	return os.MkdirAll(filepath.Join(documentRoot, "data", gameID), 0740)
 }

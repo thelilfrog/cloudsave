@@ -42,7 +42,7 @@ func (c *Client) Hash(gameID string) (string, error) {
 		return "", err
 	}
 
-	if h, ok := (o).(string); ok {
+	if h, ok := (o.Data).(string); ok {
 		return h, nil
 	}
 
@@ -60,8 +60,8 @@ func (c *Client) Version(gameID string) (int, error) {
 		return 0, err
 	}
 
-	if h, ok := (o).(int); ok {
-		return h, nil
+	if h, ok := (o.Data).(float64); ok {
+		return int(h), nil
 	}
 
 	return 0, errors.New("invalid payload sent by the server")
@@ -121,6 +121,48 @@ func (c *Client) Push(gameID, archivePath string, m game.Metadata) error {
 	return nil
 }
 
+func (c *Client) Pull(gameID, archivePath string) error {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "data")
+	if err != nil {
+		return err
+	}
+
+	cli := http.Client{}
+
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return err
+	}
+
+	req.SetBasicAuth(c.username, c.password)
+
+	f, err := os.OpenFile(archivePath+".part", os.O_CREATE|os.O_WRONLY, 0740)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer f.Close()
+
+	res, err := cli.Do(req)
+	if err != nil {
+		return fmt.Errorf("cannot connect to remote: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("cannot connect to remote: server return code: %s", res.Status)
+	}
+
+	if _, err := io.Copy(f, req.Body); err != nil {
+		return fmt.Errorf("an error occured while copying the file from the remote: %w", err)
+	}
+
+	if err := os.Rename(archivePath+".part", archivePath); err != nil {
+		return fmt.Errorf("failed to move temporary data: %w", err)
+	}
+
+	return nil
+}
+
 func (c *Client) Ping() bool {
 	cli := http.Client{}
 
@@ -152,31 +194,31 @@ func (c *Client) Ping() bool {
 	return true
 }
 
-func (c *Client) get(url string) (any, error) {
+func (c *Client) get(url string) (obj.HTTPObject, error) {
 	cli := http.Client{}
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return obj.HTTPObject{}, err
 	}
 
 	req.SetBasicAuth(c.username, c.password)
 
 	res, err := cli.Do(req)
 	if err != nil {
-		return nil, err
+		return obj.HTTPObject{}, err
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("server returns an unexpected status code: %d %s (expected 200)", res.StatusCode, res.Status)
+		return obj.HTTPObject{}, fmt.Errorf("server returns an unexpected status code: %d %s (expected 200)", res.StatusCode, res.Status)
 	}
 
 	var httpObject obj.HTTPObject
 	d := json.NewDecoder(res.Body)
 	err = d.Decode(&httpObject)
 	if err != nil {
-		return nil, err
+		return obj.HTTPObject{}, err
 	}
 
 	return httpObject, nil
