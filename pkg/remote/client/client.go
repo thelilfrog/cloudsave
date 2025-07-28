@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 )
 
 type (
@@ -65,6 +66,24 @@ func (c *Client) Version(gameID string) (int, error) {
 	}
 
 	return 0, errors.New("invalid payload sent by the server")
+}
+
+func (c *Client) Date(gameID string) (time.Time, error) {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "version")
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	o, err := c.get(u)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	if h, ok := (o.Data).(time.Time); ok {
+		return h, nil
+	}
+
+	return time.Time{}, errors.New("invalid payload sent by the server")
 }
 
 func (c *Client) Push(gameID, archivePath string, m game.Metadata) error {

@@ -9,14 +9,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type (
 	Metadata struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Path    string `json:"path"`
-		Version int    `json:"version"`
+		ID      string    `json:"id"`
+		Name    string    `json:"name"`
+		Path    string    `json:"path"`
+		Version int       `json:"version"`
+		Date    time.Time `json:"date"`
 	}
 )
 
@@ -177,6 +179,35 @@ func SetVersion(gameID string, version int) error {
 	f.Seek(0, io.SeekStart)
 
 	metadata.Version = version
+
+	e := json.NewEncoder(f)
+	err = e.Encode(metadata)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func SetDate(gameID string, dt time.Time) error {
+	path := filepath.Join(datastorepath, gameID, "metadata.json")
+
+	f, err := os.OpenFile(path, os.O_RDWR, 0740)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var metadata Metadata
+	d := json.NewDecoder(f)
+	err = d.Decode(&metadata)
+	if err != nil {
+		return err
+	}
+
+	f.Seek(0, io.SeekStart)
+
+	metadata.Date = dt
 
 	e := json.NewEncoder(f)
 	err = e.Encode(metadata)

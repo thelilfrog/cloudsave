@@ -44,8 +44,17 @@ func (p *RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 	for _, metadata := range datastore {
 		pg.Describe("Scanning " + metadata.Name + "...")
 		metadataPath := filepath.Join(game.DatastorePath(), metadata.ID)
+		//todo transaction
 		err := archiveIfChanged(metadata.ID, metadata.Path, filepath.Join(metadataPath, "data.tar.gz"), filepath.Join(metadataPath, ".last_run"))
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: cannot process the data of %s: %s\n", metadata.ID, err)
+			return subcommands.ExitFailure
+		}
+		if err := game.SetVersion(metadata.ID, metadata.Version+1); err != nil {
+			fmt.Fprintf(os.Stderr, "error: cannot process the data of %s: %s\n", metadata.ID, err)
+			return subcommands.ExitFailure
+		}
+		if err := game.SetDate(metadata.ID, time.Now()); err != nil {
 			fmt.Fprintf(os.Stderr, "error: cannot process the data of %s: %s\n", metadata.ID, err)
 			return subcommands.ExitFailure
 		}

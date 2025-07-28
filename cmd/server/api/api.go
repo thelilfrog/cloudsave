@@ -60,6 +60,7 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 						saveRouter.Get("/{id}/data", s.download)
 						saveRouter.Get("/{id}/hash", s.hash)
 						saveRouter.Get("/{id}/version", s.version)
+						saveRouter.Get("/{id}/date", s.date)
 					})
 				})
 			})
@@ -265,6 +266,42 @@ func (s HTTPServer) version(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ok(metadata.Version, w, r)
+}
+
+func (s HTTPServer) date(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id))
+
+	sdir, err := os.Stat(path)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+
+	if !sdir.IsDir() {
+		notFound("id not found", w, r)
+		return
+	}
+
+	path = filepath.Join(path, "metadata.json")
+
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+	defer f.Close()
+
+	var metadata game.Metadata
+	d := json.NewDecoder(f)
+	err = d.Decode(&metadata)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: an error occured while reading data:", err)
+		internalServerError(w, r)
+		return
+	}
+
+	ok(metadata.Date, w, r)
 }
 
 func parseFormMetadata(gameID string, values map[string][]string) (game.Metadata, error) {

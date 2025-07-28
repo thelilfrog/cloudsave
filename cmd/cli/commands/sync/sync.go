@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"cloudsave/cmd/cli/tools/prompt"
 	"cloudsave/pkg/game"
 	"cloudsave/pkg/remote"
 	"cloudsave/pkg/remote/client"
@@ -11,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/subcommands"
 )
@@ -87,6 +89,12 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
+		dtremote, err := client.Date(r.GameID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error: failed to get the file hash from the remote:", err)
+			continue
+		}
+
 		if hlocal == hremote {
 			if vlocal != vremote {
 				slog.Debug("version is not the same, but the hash is equal. Updating local database")
@@ -108,7 +116,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		}
 
 		if vlocal < vremote {
-			if err := push(r.GameID, m, client); err != nil {
+			if err := pull(r.GameID, client); err != nil {
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
 			}
@@ -116,11 +124,55 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 				fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
 				continue
 			}
+			if err := game.SetDate(r.GameID, dtremote); err != nil {
+				fmt.Fprintln(os.Stderr, "error: failed to synchronize date:", err)
+				continue
+			}
 			continue
 		}
 
 		if vlocal == vremote {
-			fmt.Println("conflict")
+			g, err := game.One(r.GameID)
+			if err != nil {
+				slog.Warn("a conflict was found but the game is not found in the database")
+				slog.Debug("debug info", "gameID", r.GameID)
+				continue
+			}
+			fmt.Println("there are conflicts")
+			fmt.Println("----")
+			fmt.Println(g.Name, "(", g.Path, ")")
+			fmt.Println("----")
+			fmt.Println("Your version:", g.Date.Format(time.RFC1123))
+			fmt.Println("Their version:", dtremote.Format(time.RFC1123))
+			fmt.Println()
+
+			res := prompt.Conflict()
+
+			switch res {
+			case prompt.My:
+				{
+					if err := push(r.GameID, m, client); err != nil {
+						fmt.Fprintln(os.Stderr, "failed to push:", err)
+						return subcommands.ExitFailure
+					}
+				}
+
+			case prompt.Their:
+				{
+					if err := pull(r.GameID, client); err != nil {
+						fmt.Fprintln(os.Stderr, "failed to push:", err)
+						return subcommands.ExitFailure
+					}
+					if err := game.SetVersion(r.GameID, vremote); err != nil {
+						fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
+						continue
+					}
+					if err := game.SetDate(r.GameID, dtremote); err != nil {
+						fmt.Fprintln(os.Stderr, "error: failed to synchronize date:", err)
+						continue
+					}
+				}
+			}
 			continue
 		}
 
