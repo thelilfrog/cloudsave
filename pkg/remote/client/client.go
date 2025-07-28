@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cloudsave/pkg/game"
 	"cloudsave/pkg/remote/obj"
+	customtime "cloudsave/pkg/tools/time"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/schollz/progressbar/v3"
 )
 
 type (
@@ -30,6 +33,37 @@ func New(baseURL, username, password string) *Client {
 		username: username,
 		password: password,
 	}
+}
+
+func (c *Client) Exists(gameID string) (bool, error) {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "hash")
+	if err != nil {
+		return false, err
+	}
+
+	req, err := http.NewRequest("HEAD", u, nil)
+	if err != nil {
+		return false, err
+	}
+
+	req.SetBasicAuth(c.username, c.password)
+
+	cli := http.Client{}
+
+	r, err := cli.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer r.Body.Close()
+
+	switch r.StatusCode {
+	case 200:
+		return true, nil
+	case 404:
+		return false, nil
+	}
+
+	return false, fmt.Errorf("an error occured: server response: %s", r.Status)
 }
 
 func (c *Client) Hash(gameID string) (string, error) {
@@ -50,40 +84,28 @@ func (c *Client) Hash(gameID string) (string, error) {
 	return "", errors.New("invalid payload sent by the server")
 }
 
-func (c *Client) Version(gameID string) (int, error) {
-	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "version")
+func (c *Client) Metadata(gameID string) (game.Metadata, error) {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "metadata")
 	if err != nil {
-		return 0, err
+		return game.Metadata{}, err
 	}
 
 	o, err := c.get(u)
 	if err != nil {
-		return 0, err
+		return game.Metadata{}, err
 	}
 
-	if h, ok := (o.Data).(float64); ok {
-		return int(h), nil
+	if m, ok := (o.Data).(map[string]any); ok {
+		gm := game.Metadata{
+			ID:      m["id"].(string),
+			Name:    m["name"].(string),
+			Version: int(m["version"].(float64)),
+			Date:    customtime.MustParse(time.RFC3339, m["date"].(string)),
+		}
+		return gm, nil
 	}
 
-	return 0, errors.New("invalid payload sent by the server")
-}
-
-func (c *Client) Date(gameID string) (time.Time, error) {
-	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "version")
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	o, err := c.get(u)
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	if h, ok := (o.Data).(time.Time); ok {
-		return h, nil
-	}
-
-	return time.Time{}, errors.New("invalid payload sent by the server")
+	return game.Metadata{}, errors.New("invalid payload sent by the server")
 }
 
 func (c *Client) Push(gameID, archivePath string, m game.Metadata) error {
@@ -112,6 +134,7 @@ func (c *Client) Push(gameID, archivePath string, m game.Metadata) error {
 
 	writer.WriteField("name", m.Name)
 	writer.WriteField("version", strconv.Itoa(m.Version))
+	writer.WriteField("date", m.Date.Format(time.RFC3339))
 
 	if err := writer.Close(); err != nil {
 		return err
@@ -171,7 +194,13 @@ func (c *Client) Pull(gameID, archivePath string) error {
 		return fmt.Errorf("cannot connect to remote: server return code: %s", res.Status)
 	}
 
-	if _, err := io.Copy(f, req.Body); err != nil {
+	bar := progressbar.DefaultBytes(
+		res.ContentLength,
+		"Pulling...",
+	)
+	defer bar.Close()
+
+	if _, err := io.Copy(io.MultiWriter(f, bar), res.Body); err != nil {
 		return fmt.Errorf("an error occured while copying the file from the remote: %w", err)
 	}
 

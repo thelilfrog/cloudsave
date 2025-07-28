@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -41,6 +42,7 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 	})
 	router.Use(middleware.Logger)
 	router.Use(recoverMiddleware)
+	router.Use(middleware.GetHead)
 	router.Use(middleware.Compress(5, "application/gzip"))
 	router.Use(BasicAuth("cloudsave", creds))
 	router.Use(middleware.Heartbeat("/heartbeat"))
@@ -59,8 +61,7 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 						saveRouter.Post("/{id}/data", s.upload)
 						saveRouter.Get("/{id}/data", s.download)
 						saveRouter.Get("/{id}/hash", s.hash)
-						saveRouter.Get("/{id}/version", s.version)
-						saveRouter.Get("/{id}/date", s.date)
+						saveRouter.Get("/{id}/metadata", s.metadata)
 					})
 				})
 			})
@@ -232,7 +233,7 @@ func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
 	ok(hex.EncodeToString(sum), w, r)
 }
 
-func (s HTTPServer) version(w http.ResponseWriter, r *http.Request) {
+func (s HTTPServer) metadata(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id))
 
@@ -265,43 +266,7 @@ func (s HTTPServer) version(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok(metadata.Version, w, r)
-}
-
-func (s HTTPServer) date(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id))
-
-	sdir, err := os.Stat(path)
-	if err != nil {
-		notFound("id not found", w, r)
-		return
-	}
-
-	if !sdir.IsDir() {
-		notFound("id not found", w, r)
-		return
-	}
-
-	path = filepath.Join(path, "metadata.json")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
-	if err != nil {
-		notFound("id not found", w, r)
-		return
-	}
-	defer f.Close()
-
-	var metadata game.Metadata
-	d := json.NewDecoder(f)
-	err = d.Decode(&metadata)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: an error occured while reading data:", err)
-		internalServerError(w, r)
-		return
-	}
-
-	ok(metadata.Date, w, r)
+	ok(metadata, w, r)
 }
 
 func parseFormMetadata(gameID string, values map[string][]string) (game.Metadata, error) {
@@ -309,7 +274,6 @@ func parseFormMetadata(gameID string, values map[string][]string) (game.Metadata
 	if v, ok := values["name"]; ok {
 		if len(v) == 0 {
 			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
-
 		}
 		name = v[0]
 	} else {
@@ -323,6 +287,22 @@ func parseFormMetadata(gameID string, values map[string][]string) (game.Metadata
 		}
 		if v, err := strconv.Atoi(v[0]); err == nil {
 			version = v
+		} else {
+			return game.Metadata{}, err
+		}
+	} else {
+		return game.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
+	}
+
+	var date time.Time
+	if v, ok := values["date"]; ok {
+		if len(v) == 0 {
+			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
+		}
+		if v, err := time.Parse(time.RFC3339, v[0]); err == nil {
+			date = v
+		} else {
+			return game.Metadata{}, err
 		}
 	} else {
 		return game.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
@@ -332,5 +312,6 @@ func parseFormMetadata(gameID string, values map[string][]string) (game.Metadata
 		ID:      gameID,
 		Version: version,
 		Name:    name,
+		Date:    date,
 	}, nil
 }

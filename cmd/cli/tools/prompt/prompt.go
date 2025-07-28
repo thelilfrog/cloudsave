@@ -27,7 +27,7 @@ func ScanBool(msg string, defaultValue bool) bool {
 }
 
 func Conflict() ConflictResponse {
-	fmt.Println("[M: My, T: Their, A: Abort]: ")
+	fmt.Print("[M: My, T: Their, A: Abort]: ")
 
 	var r string
 	if _, err := fmt.Scanln(&r); err != nil {

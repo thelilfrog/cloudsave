@@ -65,6 +65,20 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
+		exists, err := client.Exists(r.GameID)
+		if err != nil {
+			slog.Error(err.Error())
+			continue
+		}
+
+		if !exists {
+			if err := push(r.GameID, m, client); err != nil {
+				fmt.Fprintln(os.Stderr, "failed to push:", err)
+				return subcommands.ExitFailure
+			}
+			continue
+		}
+
 		hlocal, err := game.Hash(r.GameID)
 		if err != nil {
 			slog.Error(err.Error())
@@ -83,22 +97,16 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
-		vremote, err := client.Version(r.GameID)
+		remoteMetadata, err := client.Metadata(r.GameID)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "error: failed to get the file version from the remote:", err)
-			continue
-		}
-
-		dtremote, err := client.Date(r.GameID)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error: failed to get the file hash from the remote:", err)
+			fmt.Fprintln(os.Stderr, "error: failed to get the game metadata from the remote:", err)
 			continue
 		}
 
 		if hlocal == hremote {
-			if vlocal != vremote {
+			if vlocal != remoteMetadata.Version {
 				slog.Debug("version is not the same, but the hash is equal. Updating local database")
-				if err := game.SetVersion(r.GameID, vremote); err != nil {
+				if err := game.SetVersion(r.GameID, remoteMetadata.Version); err != nil {
 					fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
 					continue
 				}
@@ -107,7 +115,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
-		if vlocal > vremote {
+		if vlocal > remoteMetadata.Version {
 			if err := push(r.GameID, m, client); err != nil {
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
@@ -115,35 +123,36 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
-		if vlocal < vremote {
+		if vlocal < remoteMetadata.Version {
 			if err := pull(r.GameID, client); err != nil {
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
 			}
-			if err := game.SetVersion(r.GameID, vremote); err != nil {
+			if err := game.SetVersion(r.GameID, remoteMetadata.Version); err != nil {
 				fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
 				continue
 			}
-			if err := game.SetDate(r.GameID, dtremote); err != nil {
+			if err := game.SetDate(r.GameID, remoteMetadata.Date); err != nil {
 				fmt.Fprintln(os.Stderr, "error: failed to synchronize date:", err)
 				continue
 			}
 			continue
 		}
 
-		if vlocal == vremote {
+		if vlocal == remoteMetadata.Version {
 			g, err := game.One(r.GameID)
 			if err != nil {
 				slog.Warn("a conflict was found but the game is not found in the database")
 				slog.Debug("debug info", "gameID", r.GameID)
 				continue
 			}
-			fmt.Println("there are conflicts")
+			fmt.Println()
+			fmt.Println("--- /!\\ CONFLICT ---")
 			fmt.Println("----")
 			fmt.Println(g.Name, "(", g.Path, ")")
 			fmt.Println("----")
 			fmt.Println("Your version:", g.Date.Format(time.RFC1123))
-			fmt.Println("Their version:", dtremote.Format(time.RFC1123))
+			fmt.Println("Their version:", remoteMetadata.Date.Format(time.RFC1123))
 			fmt.Println()
 
 			res := prompt.Conflict()
@@ -163,11 +172,11 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 						fmt.Fprintln(os.Stderr, "failed to push:", err)
 						return subcommands.ExitFailure
 					}
-					if err := game.SetVersion(r.GameID, vremote); err != nil {
+					if err := game.SetVersion(r.GameID, remoteMetadata.Version); err != nil {
 						fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
 						continue
 					}
-					if err := game.SetDate(r.GameID, dtremote); err != nil {
+					if err := game.SetDate(r.GameID, remoteMetadata.Date); err != nil {
 						fmt.Fprintln(os.Stderr, "error: failed to synchronize date:", err)
 						continue
 					}

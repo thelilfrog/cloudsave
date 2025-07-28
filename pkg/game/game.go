@@ -163,22 +163,28 @@ func Version(gameID string) (int, error) {
 func SetVersion(gameID string, version int) error {
 	path := filepath.Join(datastorepath, gameID, "metadata.json")
 
-	f, err := os.OpenFile(path, os.O_RDWR, 0740)
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	var metadata Metadata
 	d := json.NewDecoder(f)
 	err = d.Decode(&metadata)
 	if err != nil {
+		f.Close()
 		return err
 	}
 
-	f.Seek(0, io.SeekStart)
+	f.Close()
 
 	metadata.Version = version
+
+	f, err = os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0740)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
 
 	e := json.NewEncoder(f)
 	err = e.Encode(metadata)
@@ -192,22 +198,28 @@ func SetVersion(gameID string, version int) error {
 func SetDate(gameID string, dt time.Time) error {
 	path := filepath.Join(datastorepath, gameID, "metadata.json")
 
-	f, err := os.OpenFile(path, os.O_RDWR, 0740)
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	var metadata Metadata
 	d := json.NewDecoder(f)
 	err = d.Decode(&metadata)
 	if err != nil {
+		f.Close()
 		return err
 	}
 
-	f.Seek(0, io.SeekStart)
+	f.Close()
 
 	metadata.Date = dt
+
+	f, err = os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0740)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
 
 	e := json.NewEncoder(f)
 	err = e.Encode(metadata)
