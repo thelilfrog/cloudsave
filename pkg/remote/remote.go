@@ -1,8 +1,8 @@
 package remote
 
 import (
-	"cloudsave/pkg/game"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +20,10 @@ var (
 	datastorepath string
 )
 
+var (
+	ErrNoRemote error = errors.New("no remote found for this game")
+)
+
 func init() {
 	var err error
 	roaming, err = os.UserConfigDir()
@@ -34,45 +38,12 @@ func init() {
 	}
 }
 
-func All() ([]Remote, error) {
-	ds, err := os.ReadDir(datastorepath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot open the datastore: %w", err)
-	}
-
-	var remotes []Remote
-	for _, d := range ds {
-		content, err := os.ReadFile(filepath.Join(datastorepath, d.Name(), "remote.json"))
-		if err != nil {
-			continue
-		}
-
-		var r Remote
-		err = json.Unmarshal(content, &r)
-		if err != nil {
-			return nil, fmt.Errorf("corrupted datastore: failed to parse %s/remote.json: %w", d.Name(), err)
-		}
-
-		content, err = os.ReadFile(filepath.Join(datastorepath, d.Name(), "metadata.json"))
-		if err != nil {
-			return nil, fmt.Errorf("corrupted datastore: failed to read %s/metadata.json: %w", d.Name(), err)
-		}
-
-		var m game.Metadata
-		err = json.Unmarshal(content, &m)
-		if err != nil {
-			return nil, fmt.Errorf("corrupted datastore: failed to parse %s/metadata.json: %w", d.Name(), err)
-		}
-
-		r.GameID = m.ID
-		remotes = append(remotes, r)
-	}
-	return remotes, nil
-}
-
 func One(gameID string) (Remote, error) {
 	content, err := os.ReadFile(filepath.Join(datastorepath, gameID, "remote.json"))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Remote{}, ErrNoRemote
+		}
 		return Remote{}, err
 	}
 
@@ -82,18 +53,7 @@ func One(gameID string) (Remote, error) {
 		return Remote{}, fmt.Errorf("corrupted datastore: failed to parse %s/remote.json: %w", gameID, err)
 	}
 
-	content, err = os.ReadFile(filepath.Join(datastorepath, gameID, "metadata.json"))
-	if err != nil {
-		return Remote{}, fmt.Errorf("corrupted datastore: failed to read %s/metadata.json: %w", gameID, err)
-	}
-
-	var m game.Metadata
-	err = json.Unmarshal(content, &m)
-	if err != nil {
-		return Remote{}, fmt.Errorf("corrupted datastore: failed to parse %s/metadata.json: %w", gameID, err)
-	}
-
-	r.GameID = m.ID
+	r.GameID = gameID
 	return r, nil
 }
 
@@ -102,7 +62,7 @@ func Set(gameID, url string) error {
 		URL: url,
 	}
 
-	f, err := os.OpenFile(filepath.Join(datastorepath, gameID, "remote.json"), os.O_WRONLY|os.O_CREATE, 0740)
+	f, err := os.OpenFile(filepath.Join(datastorepath, gameID, "remote.json"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0740)
 	if err != nil {
 		return err
 	}

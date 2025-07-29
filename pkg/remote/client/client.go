@@ -211,35 +211,62 @@ func (c *Client) Pull(gameID, archivePath string) error {
 	return nil
 }
 
-func (c *Client) Ping() bool {
+func (c *Client) Ping() error {
 	cli := http.Client{}
 
 	hburl, err := url.JoinPath(c.baseURL, "heartbeat")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "cannot connect to remote:", err)
-		return false
+		return err
 	}
 
 	req, err := http.NewRequest("GET", hburl, nil)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "cannot connect to remote:", err)
-		return false
+		return err
 	}
 
 	req.SetBasicAuth(c.username, c.password)
 
 	res, err := cli.Do(req)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "cannot connect to remote:", err)
-		return false
+		return err
 	}
 
 	if res.StatusCode != http.StatusOK {
-		fmt.Fprintln(os.Stderr, "cannot connect to remote: server return code", res.StatusCode)
-		return false
+		return fmt.Errorf("cannot connect to remote: server return code %s", res.Status)
 	}
 
-	return true
+	return nil
+}
+
+func (c *Client) All() ([]game.Metadata, error) {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games")
+	if err != nil {
+		return nil, err
+	}
+
+	o, err := c.get(u)
+	if err != nil {
+		return nil, err
+	}
+
+	if games, ok := (o.Data).([]any); ok {
+		var res []game.Metadata
+		for _, g := range games {
+			if v, ok := g.(map[string]any); ok {
+				gm := game.Metadata{
+					ID:      v["id"].(string),
+					Name:    v["name"].(string),
+					Version: int(v["version"].(float64)),
+					Date:    customtime.MustParse(time.RFC3339, v["date"].(string)),
+				}
+				res = append(res, gm)
+			}
+		}
+
+		return res, nil
+	}
+
+	return nil, errors.New("invalid payload sent by the server")
 }
 
 func (c *Client) get(url string) (obj.HTTPObject, error) {

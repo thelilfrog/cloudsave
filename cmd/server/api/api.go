@@ -6,8 +6,10 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -44,9 +46,9 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 	router.Use(recoverMiddleware)
 	router.Use(middleware.GetHead)
 	router.Use(middleware.Compress(5, "application/gzip"))
-	router.Use(BasicAuth("cloudsave", creds))
 	router.Use(middleware.Heartbeat("/heartbeat"))
 	router.Route("/api", func(routerAPI chi.Router) {
+		routerAPI.Use(BasicAuth("cloudsave", creds))
 		routerAPI.Route("/v1", func(r chi.Router) {
 			// Get information about the server
 			r.Get("/version", s.Information)
@@ -75,17 +77,30 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 }
 
 func (s HTTPServer) all(w http.ResponseWriter, r *http.Request) {
-	ds, err := os.ReadDir(s.documentRoot)
+	path := filepath.Join(s.documentRoot, "data")
+	datastore := make([]game.Metadata, 0)
+
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			ok(datastore, w, r)
+			return
+		}
+		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
+		internalServerError(w, r)
+		return
+	}
+
+	ds, err := os.ReadDir(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
 		internalServerError(w, r)
 		return
 	}
 
-	datastore := make([]game.Metadata, 0)
 	for _, d := range ds {
-		content, err := os.ReadFile(filepath.Join(s.documentRoot, d.Name(), "metadata.json"))
+		content, err := os.ReadFile(filepath.Join(path, d.Name(), "metadata.json"))
 		if err != nil {
+			slog.Error("error: failed to load metadata.json", "err", err)
 			continue
 		}
 

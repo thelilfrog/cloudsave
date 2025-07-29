@@ -7,6 +7,7 @@ import (
 	"cloudsave/pkg/remote/client"
 	"cloudsave/pkg/tools/prompt/credentials"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -34,45 +35,37 @@ func (p *SyncCmd) SetFlags(f *flag.FlagSet) {
 }
 
 func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
-	remotes, err := remote.All()
+	games, err := game.All()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load datastore:", err)
 		return subcommands.ExitFailure
 	}
 
-	if len(remotes) == 0 {
-		fmt.Println("nothing to do: no remote found")
-		return subcommands.ExitSuccess
-	}
-
-	username, password, err := credentials.Read()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: failed to read std output:", err)
-		return subcommands.ExitFailure
-	}
-
-	for _, r := range remotes {
-		m, err := game.One(r.GameID)
+	remoteCred := make(map[string]map[string]string)
+	for _, g := range games {
+		r, err := remote.One(g.ID)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "error: cannot get metadata for this game: %w", err)
+			if errors.Is(err, remote.ErrNoRemote) {
+				continue
+			}
+			fmt.Fprintln(os.Stderr, "error: failed to load datastore:", err)
 			return subcommands.ExitFailure
 		}
 
-		client := client.New(r.URL, username, password)
-
-		if !client.Ping() {
-			slog.Warn("remote is unavailable", "url", r.URL)
-			continue
+		cli, err := connect(remoteCred, r)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error: failed to connect to the remote:", err)
+			return subcommands.ExitFailure
 		}
 
-		exists, err := client.Exists(r.GameID)
+		exists, err := cli.Exists(r.GameID)
 		if err != nil {
 			slog.Error(err.Error())
 			continue
 		}
 
 		if !exists {
-			if err := push(r.GameID, m, client); err != nil {
+			if err := push(r.GameID, g, cli); err != nil {
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
 			}
@@ -85,7 +78,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
-		hremote, err := client.Hash(r.GameID)
+		hremote, err := cli.Hash(r.GameID)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error: failed to get the file hash from the remote:", err)
 			continue
@@ -97,7 +90,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
-		remoteMetadata, err := client.Metadata(r.GameID)
+		remoteMetadata, err := cli.Metadata(r.GameID)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error: failed to get the game metadata from the remote:", err)
 			continue
@@ -116,7 +109,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		}
 
 		if vlocal > remoteMetadata.Version {
-			if err := push(r.GameID, m, client); err != nil {
+			if err := push(r.GameID, g, cli); err != nil {
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
 			}
@@ -124,7 +117,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		}
 
 		if vlocal < remoteMetadata.Version {
-			if err := pull(r.GameID, client); err != nil {
+			if err := pull(r.GameID, cli); err != nil {
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
 			}
@@ -140,54 +133,56 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		}
 
 		if vlocal == remoteMetadata.Version {
-			g, err := game.One(r.GameID)
-			if err != nil {
-				slog.Warn("a conflict was found but the game is not found in the database")
-				slog.Debug("debug info", "gameID", r.GameID)
+			if err := conflict(r.GameID, g, remoteMetadata, cli); err != nil {
+				fmt.Fprintln(os.Stderr, "error: failed to resolve conflict:", err)
 				continue
-			}
-			fmt.Println()
-			fmt.Println("--- /!\\ CONFLICT ---")
-			fmt.Println("----")
-			fmt.Println(g.Name, "(", g.Path, ")")
-			fmt.Println("----")
-			fmt.Println("Your version:", g.Date.Format(time.RFC1123))
-			fmt.Println("Their version:", remoteMetadata.Date.Format(time.RFC1123))
-			fmt.Println()
-
-			res := prompt.Conflict()
-
-			switch res {
-			case prompt.My:
-				{
-					if err := push(r.GameID, m, client); err != nil {
-						fmt.Fprintln(os.Stderr, "failed to push:", err)
-						return subcommands.ExitFailure
-					}
-				}
-
-			case prompt.Their:
-				{
-					if err := pull(r.GameID, client); err != nil {
-						fmt.Fprintln(os.Stderr, "failed to push:", err)
-						return subcommands.ExitFailure
-					}
-					if err := game.SetVersion(r.GameID, remoteMetadata.Version); err != nil {
-						fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
-						continue
-					}
-					if err := game.SetDate(r.GameID, remoteMetadata.Date); err != nil {
-						fmt.Fprintln(os.Stderr, "error: failed to synchronize date:", err)
-						continue
-					}
-				}
 			}
 			continue
 		}
-
 	}
 
 	return subcommands.ExitSuccess
+}
+
+func conflict(gameID string, m, remoteMetadata game.Metadata, cli *client.Client) error {
+	g, err := game.One(gameID)
+	if err != nil {
+		slog.Warn("a conflict was found but the game is not found in the database")
+		slog.Debug("debug info", "gameID", gameID)
+		return nil
+	}
+	fmt.Println()
+	fmt.Println("--- /!\\ CONFLICT ---")
+	fmt.Println(g.Name, "(", g.Path, ")")
+	fmt.Println("----")
+	fmt.Println("Your version:", g.Date.Format(time.RFC1123))
+	fmt.Println("Their version:", remoteMetadata.Date.Format(time.RFC1123))
+	fmt.Println()
+
+	res := prompt.Conflict()
+
+	switch res {
+	case prompt.My:
+		{
+			if err := push(gameID, m, cli); err != nil {
+				return fmt.Errorf("failed to push: %w", err)
+			}
+		}
+
+	case prompt.Their:
+		{
+			if err := pull(gameID, cli); err != nil {
+				return fmt.Errorf("failed to push: %w", err)
+			}
+			if err := game.SetVersion(gameID, remoteMetadata.Version); err != nil {
+				return fmt.Errorf("failed to synchronize version number: %w", err)
+			}
+			if err := game.SetDate(gameID, remoteMetadata.Date); err != nil {
+				return fmt.Errorf("failed to synchronize date: %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 func push(gameID string, m game.Metadata, cli *client.Client) error {
@@ -200,4 +195,31 @@ func pull(gameID string, cli *client.Client) error {
 	archivePath := filepath.Join(game.DatastorePath(), gameID, "data.tar.gz")
 
 	return cli.Pull(gameID, archivePath)
+}
+
+func connect(remoteCred map[string]map[string]string, r remote.Remote) (*client.Client, error) {
+	var cli *client.Client
+
+	if v, ok := remoteCred[r.URL]; ok {
+		cli = client.New(r.URL, v["username"], v["password"])
+		return cli, nil
+	}
+
+	username, password, err := credentials.Read()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read std output: %w", err)
+	}
+
+	cli = client.New(r.URL, username, password)
+
+	if err := cli.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to connect to the remote: %w", err)
+	}
+
+	c := make(map[string]string)
+	c["username"] = username
+	c["password"] = password
+	remoteCred[r.URL] = c
+
+	return cli, nil
 }

@@ -41,7 +41,7 @@ func (p *AddCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 	}
 
 	if p.name == "" {
-		p.name = filepath.Base(filepath.Dir(path))
+		p.name = filepath.Base(path)
 	}
 
 	m, err := game.Add(p.name, path)

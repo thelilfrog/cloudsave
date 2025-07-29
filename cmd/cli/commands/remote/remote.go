@@ -1,7 +1,9 @@
 package remote
 
 import (
+	"cloudsave/pkg/game"
 	"cloudsave/pkg/remote"
+	"cloudsave/pkg/remote/client"
 	"context"
 	"flag"
 	"fmt"
@@ -30,38 +32,60 @@ func (p *RemoteCmd) SetFlags(f *flag.FlagSet) {
 	f.BoolVar(&p.set, "set", false, "set remote for a game")
 }
 
-func (p *RemoteCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
-	if p.list {
-		remotes, err := remote.All()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error: failed to load datastore:", err)
-			return subcommands.ExitFailure
+func (p *RemoteCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
+	switch {
+	case p.list:
+		{
+			if err := list(); err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				return subcommands.ExitFailure
+			}
 		}
-
-		fmt.Println("ID | REMOTE URL")
-		fmt.Println("-- | ----------")
-		for _, remote := range remotes {
-			fmt.Println(remote.GameID, "|", remote.URL)
+	case p.set:
+		{
+			if f.NArg() != 2 {
+				subcommands.HelpCommand().Execute(ctx, f, nil)
+				return subcommands.ExitUsageError
+			}
+			if err := set(f.Arg(0), f.Arg(1)); err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				return subcommands.ExitFailure
+			}
 		}
-		return subcommands.ExitSuccess
-	}
-
-	if p.set {
-		if f.NArg() != 2 {
-			fmt.Fprintln(os.Stderr, "error: the command is expecting for 2 arguments")
-			f.Usage()
+	default:
+		{
+			subcommands.HelpCommand().Execute(ctx, f, nil)
 			return subcommands.ExitUsageError
 		}
+	}
+	return subcommands.ExitSuccess
+}
 
-		err := remote.Set(f.Arg(0), f.Arg(1))
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error: failed to set remote:", err)
-			return subcommands.ExitFailure
-		}
-		fmt.Println(f.Arg(0))
-		return subcommands.ExitSuccess
+func list() error {
+	games, err := game.All()
+	if err != nil {
+		return fmt.Errorf("failed to load datastore: %w", err)
 	}
 
-	f.Usage()
-	return subcommands.ExitUsageError
+	for _, g := range games {
+		r, err := remote.One(g.ID)
+		if err != nil {
+			return fmt.Errorf("failed to load datastore: %w", err)
+		}
+
+		cli := client.New(r.URL, "", "")
+
+		status := "OK"
+		if err := cli.Ping(); err != nil {
+			status = "ERROR: " + err.Error()
+		}
+
+		fmt.Printf("'%s' -> %s (%s)\n", g.Name, r.URL, status)
+	}
+
+	return nil
+}
+
+func set(gameID, url string) error {
+	return remote.Set(gameID, url)
 }

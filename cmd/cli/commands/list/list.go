@@ -2,6 +2,8 @@ package list
 
 import (
 	"cloudsave/pkg/game"
+	"cloudsave/pkg/remote/client"
+	"cloudsave/pkg/tools/prompt/credentials"
 	"context"
 	"flag"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 
 type (
 	ListCmd struct {
+		remote bool
 	}
 )
 
@@ -24,20 +27,72 @@ func (*ListCmd) Usage() string {
 }
 
 func (p *ListCmd) SetFlags(f *flag.FlagSet) {
+	f.BoolVar(&p.remote, "a", false, "list all including remote data")
 }
 
 func (p *ListCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
-	datastore, err := game.All()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: failed to load datastore:", err)
+	if p.remote {
+		if f.NArg() != 1 {
+			fmt.Fprintln(os.Stderr, "error: missing remote url")
+			return subcommands.ExitUsageError
+		}
+
+		username, password, err := credentials.Read()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to read std output: %s", err)
+			return subcommands.ExitFailure
+		}
+
+		if err := remote(f.Arg(0), username, password); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return subcommands.ExitFailure
+		}
+		return subcommands.ExitSuccess
+	}
+	if err := local(); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
 		return subcommands.ExitFailure
 	}
+	return subcommands.ExitSuccess
+}
 
-	fmt.Println("ID | NAME | PATH")
-	fmt.Println("-- | ---- | ----")
-	for _, metadata := range datastore {
-		fmt.Println(metadata.ID, "|", metadata.Name, "|", metadata.Path)
+func local() error {
+	games, err := game.All()
+	if err != nil {
+		return fmt.Errorf("failed to load datastore: %w", err)
 	}
 
-	return subcommands.ExitSuccess
+	for _, g := range games {
+		fmt.Println("ID:", g.ID)
+		fmt.Println("Name:", g.Name)
+		fmt.Println("Last Version:", g.Date, "( Version Number", g.Version, ")")
+		fmt.Println("---")
+	}
+
+	return nil
+}
+
+func remote(url, username, password string) error {
+	cli := client.New(url, username, password)
+
+	if err := cli.Ping(); err != nil {
+		return fmt.Errorf("failed to connect to the remote: %w", err)
+	}
+
+	games, err := cli.All()
+	if err != nil {
+		return fmt.Errorf("failed to load games from remote: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("Remote:", url)
+	fmt.Println("---")
+	for _, g := range games {
+		fmt.Println("ID:", g.ID)
+		fmt.Println("Name:", g.Name)
+		fmt.Println("Last Version:", g.Date, "( Version Number", g.Version, ")")
+		fmt.Println("---")
+	}
+
+	return nil
 }

@@ -10,7 +10,6 @@ import (
 	"cloudsave/cmd/cli/commands/version"
 	"context"
 	"flag"
-	"fmt"
 	"os"
 
 	"github.com/google/subcommands"
@@ -33,8 +32,5 @@ func main() {
 	flag.Parse()
 	ctx := context.Background()
 
-	exitCode := subcommands.Execute(ctx)
-	fmt.Println()
-
-	os.Exit(int(exitCode))
+	os.Exit(int(subcommands.Execute(ctx)))
 }
