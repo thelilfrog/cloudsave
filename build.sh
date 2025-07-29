@@ -35,7 +35,6 @@ fi
 ## SERVER
 
 platforms=("linux/amd64" "linux/arm64" "linux/riscv64" "linux/ppc64le")
-echo $MAKE_PACKAGE
 CGO_ENABLED=0
 
 for platform in "${platforms[@]}"; do
