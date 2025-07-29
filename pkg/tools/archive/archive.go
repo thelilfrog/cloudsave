@@ -3,6 +3,7 @@ package archive
 import (
 	"archive/tar"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -70,4 +71,50 @@ func Untar(file io.Reader, path string) error {
 			f.Close()
 		}
 	}
+}
+
+func Tar(file io.Writer, path string) error {
+	gw := gzip.NewWriter(file)
+	defer gw.Close()
+
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+
+	// Walk again to add files
+	err := filepath.Walk(path, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		// Create tar header
+		header, err := tar.FileInfoHeader(info, path)
+		if err != nil {
+			return err
+		}
+		// Preserve directory structure relative to srcDir
+		relPath, err := filepath.Rel(filepath.Dir(path), path)
+		if err != nil {
+			return err
+		}
+		header.Name = relPath
+
+		if err := tw.WriteHeader(header); err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			file, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer file.Close()
+			if _, err := io.Copy(tw, file); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("writing tar entries: %w", err)
+	}
+
+	return nil
 }

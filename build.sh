@@ -1,7 +1,7 @@
 #!/bin/bash
 
 MAKE_PACKAGE=false
-VERSION=0.0.1
+VERSION=0.0.2
 
 usage() {
  echo "Usage: $0 [OPTIONS]"

@@ -1,4 +1,4 @@
-package game
+package repository
 
 import (
 	"cloudsave/pkg/tools/id"
@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -133,6 +134,65 @@ func One(gameID string) (Metadata, error) {
 	}
 
 	return m, nil
+}
+
+func Archive(gameID string) error {
+	path := filepath.Join(datastorepath, gameID, "data.tar.gz")
+
+	// open old
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open old file: %w", err)
+	}
+	defer f.Close()
+
+	histDirPath := filepath.Join(datastorepath, gameID, "hist")
+	if err := os.MkdirAll(histDirPath, 0740); err != nil {
+		return fmt.Errorf("failed to make 'hist' directory")
+	}
+
+	d, err := os.ReadDir(histDirPath)
+	if err != nil {
+		return fmt.Errorf("failed to open 'hist' directory")
+	}
+
+	// keep the dir under 6 files
+	if len(d) > 5 {
+		var oldest *fs.FileInfo
+		for _, hfile := range d {
+			finfo, err := hfile.Info()
+			if err != nil {
+				return fmt.Errorf("failed to read backup file: %w", err)
+			}
+
+			if oldest == nil {
+				oldest = &finfo
+				continue
+			}
+
+			if finfo.ModTime().Before((*oldest).ModTime()) {
+				oldest = &finfo
+			}
+		}
+
+		if err := os.Remove((*oldest).Name()); err != nil {
+			return fmt.Errorf("failed to remove the oldest backup file: %w", err)
+		}
+	}
+
+	// open new
+	nf, err := os.OpenFile(filepath.Join(datastorepath, gameID, "hist", time.Now().Format("2006-01-02T15-04-05Z07-00")+".data.tar.gz"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
+	if err != nil {
+		return fmt.Errorf("failed to open new file: %w", err)
+	}
+	defer nf.Close()
+
+	// copy
+	if _, err := io.Copy(nf, f); err != nil {
+		return fmt.Errorf("failed to copy data: %w", err)
+	}
+
+	return nil
 }
 
 func DatastorePath() string {

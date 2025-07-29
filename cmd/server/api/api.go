@@ -2,7 +2,7 @@ package api
 
 import (
 	"cloudsave/cmd/server/data"
-	"cloudsave/pkg/game"
+	"cloudsave/pkg/repository"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -61,6 +61,7 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 					// Data routes
 					gamesRouter.Group(func(saveRouter chi.Router) {
 						saveRouter.Post("/{id}/data", s.upload)
+						saveRouter.Post("/{id}/hist/data", s.histUpload)
 						saveRouter.Get("/{id}/data", s.download)
 						saveRouter.Get("/{id}/hash", s.hash)
 						saveRouter.Get("/{id}/metadata", s.metadata)
@@ -78,7 +79,7 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 
 func (s HTTPServer) all(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(s.documentRoot, "data")
-	datastore := make([]game.Metadata, 0)
+	datastore := make([]repository.Metadata, 0)
 
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -104,7 +105,7 @@ func (s HTTPServer) all(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		var m game.Metadata
+		var m repository.Metadata
 		err = json.Unmarshal(content, &m)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "corrupted datastore: failed to parse %s/metadata.json: %s", d.Name(), err)
@@ -209,6 +210,49 @@ func (s HTTPServer) upload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
+func (s HTTPServer) histUpload(w http.ResponseWriter, r *http.Request) {
+	const (
+		sizeLimit int64 = 500 << 20 // 500 MB
+	)
+
+	id := chi.URLParam(r, "id")
+	dt, err := formParseDate("date", r.MultipartForm.Value)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to load payload:", err)
+		badRequest("bad payload", w, r)
+		return
+	}
+
+	// Limit max upload size
+	r.Body = http.MaxBytesReader(w, r.Body, sizeLimit)
+
+	// Parse multipart form
+	err = r.ParseMultipartForm(sizeLimit)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to load payload:", err)
+		badRequest("bad payload", w, r)
+		return
+	}
+
+	// Retrieve file
+	file, _, err := r.FormFile("payload")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: cannot find payload in the form:", err)
+		badRequest("payload not found", w, r)
+		return
+	}
+	defer file.Close()
+
+	if err := data.WriteHist(id, s.documentRoot, dt, file); err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to write file to disk:", err)
+		internalServerError(w, r)
+		return
+	}
+
+	// Respond success
+	w.WriteHeader(http.StatusCreated)
+}
+
 func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id))
@@ -272,7 +316,7 @@ func (s HTTPServer) metadata(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	var metadata game.Metadata
+	var metadata repository.Metadata
 	d := json.NewDecoder(f)
 	err = d.Decode(&metadata)
 	if err != nil {
@@ -284,49 +328,67 @@ func (s HTTPServer) metadata(w http.ResponseWriter, r *http.Request) {
 	ok(metadata, w, r)
 }
 
-func parseFormMetadata(gameID string, values map[string][]string) (game.Metadata, error) {
+func parseFormMetadata(gameID string, values map[string][]string) (repository.Metadata, error) {
 	var name string
 	if v, ok := values["name"]; ok {
 		if len(v) == 0 {
-			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
+			return repository.Metadata{}, fmt.Errorf("error: corrupted metadata")
 		}
 		name = v[0]
 	} else {
-		return game.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
+		return repository.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
 	}
 
 	var version int
 	if v, ok := values["version"]; ok {
 		if len(v) == 0 {
-			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
+			return repository.Metadata{}, fmt.Errorf("error: corrupted metadata")
 		}
 		if v, err := strconv.Atoi(v[0]); err == nil {
 			version = v
 		} else {
-			return game.Metadata{}, err
+			return repository.Metadata{}, err
 		}
 	} else {
-		return game.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
+		return repository.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
 	}
 
 	var date time.Time
 	if v, ok := values["date"]; ok {
 		if len(v) == 0 {
-			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
+			return repository.Metadata{}, fmt.Errorf("error: corrupted metadata")
 		}
 		if v, err := time.Parse(time.RFC3339, v[0]); err == nil {
 			date = v
 		} else {
-			return game.Metadata{}, err
+			return repository.Metadata{}, err
 		}
 	} else {
-		return game.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
+		return repository.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
 	}
 
-	return game.Metadata{
+	return repository.Metadata{
 		ID:      gameID,
 		Version: version,
 		Name:    name,
 		Date:    date,
 	}, nil
+}
+
+func formParseDate(key string, values map[string][]string) (time.Time, error) {
+	var date time.Time
+	if v, ok := values[key]; ok {
+		if len(v) == 0 {
+			return time.Time{}, fmt.Errorf("error: corrupted metadata")
+		}
+		if v, err := time.Parse(time.RFC3339, v[0]); err == nil {
+			date = v
+		} else {
+			return time.Time{}, err
+		}
+	} else {
+		return time.Time{}, fmt.Errorf("error: cannot find metadata in the form")
+	}
+
+	return date, nil
 }

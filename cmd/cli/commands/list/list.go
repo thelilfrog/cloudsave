@@ -1,9 +1,9 @@
 package list
 
 import (
-	"cloudsave/pkg/game"
 	"cloudsave/pkg/remote/client"
-	"cloudsave/pkg/tools/prompt/credentials"
+	"cloudsave/pkg/repository"
+	"cloudsave/cmd/cli/tools/prompt/credentials"
 	"context"
 	"flag"
 	"fmt"
@@ -57,7 +57,7 @@ func (p *ListCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 }
 
 func local() error {
-	games, err := game.All()
+	games, err := repository.All()
 	if err != nil {
 		return fmt.Errorf("failed to load datastore: %w", err)
 	}

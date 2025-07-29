@@ -2,8 +2,8 @@ package client
 
 import (
 	"bytes"
-	"cloudsave/pkg/game"
 	"cloudsave/pkg/remote/obj"
+	"cloudsave/pkg/repository"
 	customtime "cloudsave/pkg/tools/time"
 	"encoding/json"
 	"errors"
@@ -117,19 +117,19 @@ func (c *Client) Hash(gameID string) (string, error) {
 	return "", errors.New("invalid payload sent by the server")
 }
 
-func (c *Client) Metadata(gameID string) (game.Metadata, error) {
+func (c *Client) Metadata(gameID string) (repository.Metadata, error) {
 	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "metadata")
 	if err != nil {
-		return game.Metadata{}, err
+		return repository.Metadata{}, err
 	}
 
 	o, err := c.get(u)
 	if err != nil {
-		return game.Metadata{}, err
+		return repository.Metadata{}, err
 	}
 
 	if m, ok := (o.Data).(map[string]any); ok {
-		gm := game.Metadata{
+		gm := repository.Metadata{
 			ID:      m["id"].(string),
 			Name:    m["name"].(string),
 			Version: int(m["version"].(float64)),
@@ -138,10 +138,10 @@ func (c *Client) Metadata(gameID string) (game.Metadata, error) {
 		return gm, nil
 	}
 
-	return game.Metadata{}, errors.New("invalid payload sent by the server")
+	return repository.Metadata{}, errors.New("invalid payload sent by the server")
 }
 
-func (c *Client) Push(gameID, archivePath string, m game.Metadata) error {
+func (c *Client) Push(gameID, archivePath string, m repository.Metadata) error {
 	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "data")
 	if err != nil {
 		return err
@@ -271,7 +271,7 @@ func (c *Client) Ping() error {
 	return nil
 }
 
-func (c *Client) All() ([]game.Metadata, error) {
+func (c *Client) All() ([]repository.Metadata, error) {
 	u, err := url.JoinPath(c.baseURL, "api", "v1", "games")
 	if err != nil {
 		return nil, err
@@ -283,10 +283,10 @@ func (c *Client) All() ([]game.Metadata, error) {
 	}
 
 	if games, ok := (o.Data).([]any); ok {
-		var res []game.Metadata
+		var res []repository.Metadata
 		for _, g := range games {
 			if v, ok := g.(map[string]any); ok {
-				gm := game.Metadata{
+				gm := repository.Metadata{
 					ID:      v["id"].(string),
 					Name:    v["name"].(string),
 					Version: int(v["version"].(float64)),

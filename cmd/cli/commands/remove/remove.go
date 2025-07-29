@@ -1,7 +1,7 @@
 package remove
 
 import (
-	"cloudsave/pkg/game"
+	"cloudsave/pkg/repository"
 	"context"
 	"flag"
 	"fmt"
@@ -31,7 +31,7 @@ func (p *RemoveCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}
 		return subcommands.ExitUsageError
 	}
 
-	err := game.Remove(f.Arg(0))
+	err := repository.Remove(f.Arg(0))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to unregister the game:", err)
 		return subcommands.ExitFailure

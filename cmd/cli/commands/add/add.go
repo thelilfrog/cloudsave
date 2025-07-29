@@ -1,7 +1,7 @@
 package add
 
 import (
-	"cloudsave/pkg/game"
+	"cloudsave/pkg/repository"
 	"context"
 	"flag"
 	"fmt"
@@ -44,7 +44,7 @@ func (p *AddCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 		p.name = filepath.Base(path)
 	}
 
-	m, err := game.Add(p.name, path)
+	m, err := repository.Add(p.name, path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to add game reference:", err)
 		return subcommands.ExitFailure

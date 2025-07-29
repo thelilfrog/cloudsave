@@ -3,7 +3,7 @@ package version
 import (
 	"cloudsave/pkg/constants"
 	"cloudsave/pkg/remote/client"
-	"cloudsave/pkg/tools/prompt/credentials"
+	"cloudsave/cmd/cli/tools/prompt/credentials"
 	"context"
 	"flag"
 	"fmt"

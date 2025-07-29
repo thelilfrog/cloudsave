@@ -2,10 +2,10 @@ package sync
 
 import (
 	"cloudsave/cmd/cli/tools/prompt"
-	"cloudsave/pkg/game"
+	"cloudsave/cmd/cli/tools/prompt/credentials"
 	"cloudsave/pkg/remote"
 	"cloudsave/pkg/remote/client"
-	"cloudsave/pkg/tools/prompt/credentials"
+	"cloudsave/pkg/repository"
 	"context"
 	"errors"
 	"flag"
@@ -35,7 +35,7 @@ func (p *SyncCmd) SetFlags(f *flag.FlagSet) {
 }
 
 func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
-	games, err := game.All()
+	games, err := repository.All()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load datastore:", err)
 		return subcommands.ExitFailure
@@ -72,7 +72,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
-		hlocal, err := game.Hash(r.GameID)
+		hlocal, err := repository.Hash(r.GameID)
 		if err != nil {
 			slog.Error(err.Error())
 			continue
@@ -84,7 +84,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
-		vlocal, err := game.Version(r.GameID)
+		vlocal, err := repository.Version(r.GameID)
 		if err != nil {
 			slog.Error(err.Error())
 			continue
@@ -99,7 +99,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		if hlocal == hremote {
 			if vlocal != remoteMetadata.Version {
 				slog.Debug("version is not the same, but the hash is equal. Updating local database")
-				if err := game.SetVersion(r.GameID, remoteMetadata.Version); err != nil {
+				if err := repository.SetVersion(r.GameID, remoteMetadata.Version); err != nil {
 					fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
 					continue
 				}
@@ -121,11 +121,11 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
 			}
-			if err := game.SetVersion(r.GameID, remoteMetadata.Version); err != nil {
+			if err := repository.SetVersion(r.GameID, remoteMetadata.Version); err != nil {
 				fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
 				continue
 			}
-			if err := game.SetDate(r.GameID, remoteMetadata.Date); err != nil {
+			if err := repository.SetDate(r.GameID, remoteMetadata.Date); err != nil {
 				fmt.Fprintln(os.Stderr, "error: failed to synchronize date:", err)
 				continue
 			}
@@ -144,8 +144,8 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 	return subcommands.ExitSuccess
 }
 
-func conflict(gameID string, m, remoteMetadata game.Metadata, cli *client.Client) error {
-	g, err := game.One(gameID)
+func conflict(gameID string, m, remoteMetadata repository.Metadata, cli *client.Client) error {
+	g, err := repository.One(gameID)
 	if err != nil {
 		slog.Warn("a conflict was found but the game is not found in the database")
 		slog.Debug("debug info", "gameID", gameID)
@@ -174,10 +174,10 @@ func conflict(gameID string, m, remoteMetadata game.Metadata, cli *client.Client
 			if err := pull(gameID, cli); err != nil {
 				return fmt.Errorf("failed to push: %w", err)
 			}
-			if err := game.SetVersion(gameID, remoteMetadata.Version); err != nil {
+			if err := repository.SetVersion(gameID, remoteMetadata.Version); err != nil {
 				return fmt.Errorf("failed to synchronize version number: %w", err)
 			}
-			if err := game.SetDate(gameID, remoteMetadata.Date); err != nil {
+			if err := repository.SetDate(gameID, remoteMetadata.Date); err != nil {
 				return fmt.Errorf("failed to synchronize date: %w", err)
 			}
 		}
@@ -185,14 +185,14 @@ func conflict(gameID string, m, remoteMetadata game.Metadata, cli *client.Client
 	return nil
 }
 
-func push(gameID string, m game.Metadata, cli *client.Client) error {
-	archivePath := filepath.Join(game.DatastorePath(), gameID, "data.tar.gz")
+func push(gameID string, m repository.Metadata, cli *client.Client) error {
+	archivePath := filepath.Join(repository.DatastorePath(), gameID, "data.tar.gz")
 
 	return cli.Push(gameID, archivePath, m)
 }
 
 func pull(gameID string, cli *client.Client) error {
-	archivePath := filepath.Join(game.DatastorePath(), gameID, "data.tar.gz")
+	archivePath := filepath.Join(repository.DatastorePath(), gameID, "data.tar.gz")
 
 	return cli.Pull(gameID, archivePath)
 }
