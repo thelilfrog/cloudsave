@@ -1,6 +1,7 @@
 #!/bin/bash
 
 MAKE_PACKAGE=false
+VERSION=0.0.1
 
 usage() {
  echo "Usage: $0 [OPTIONS]"
@@ -35,20 +36,22 @@ fi
 ## SERVER
 
 platforms=("linux/amd64" "linux/arm64" "linux/riscv64" "linux/ppc64le")
-CGO_ENABLED=0
 
 for platform in "${platforms[@]}"; do
     echo "* Compiling server for $platform..."
     platform_split=(${platform//\// })
 
-    GOOS=${platform_split[0]}
-    GOARCH=${platform_split[1]}
-
-    go build -o build/server_${platform_split[0]}_${platform_split[1]}.bin ./cmd/server
+    EXT=""
+    if [ "${platform_split[0]}" == "windows" ]; then
+      EXT=.exe
+    fi
 
     if [ "$MAKE_PACKAGE" == "true" ]; then
-        tar -czf build/server_${platform_split[0]}_${platform_split[1]}.tar.gz build/server_${platform_split[0]}_${platform_split[1]}.bin
-        rm build/server_${platform_split[0]}_${platform_split[1]}.bin
+        CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_server$EXT -a ./cmd/server
+        tar -czf build/server_${platform_split[0]}_${platform_split[1]}.tar.gz build/cloudsave_server$EXT
+        rm build/cloudsave_server$EXT
+    else
+      CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_server_${platform_split[0]}_${platform_split[1]}$EXT -a ./cmd/cli
     fi
 done
 
@@ -60,12 +63,16 @@ for platform in "${platforms[@]}"; do
     echo "* Compiling client for $platform..."
     platform_split=(${platform//\// })
 
-    GOOS=${platform_split[0]}
-    GOARCH=${platform_split[1]}
+    EXT=""
+    if [ "${platform_split[0]}" == "windows" ]; then
+      EXT=.exe
+    fi
 
-    go build -o build/cli_${platform_split[0]}_${platform_split[1]}.bin ./cmd/cli
     if [ "$MAKE_PACKAGE" == "true" ]; then
-        tar -czf build/cli_${platform_split[0]}_${platform_split[1]}.tar.gz build/cli_${platform_split[0]}_${platform_split[1]}.bin
-        rm build/cli_${platform_split[0]}_${platform_split[1]}.bin
+        CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave$EXT -a ./cmd/cli
+        tar -czf build/cli_${platform_split[0]}_${platform_split[1]}.tar.gz build/cloudsave$EXT
+        rm build/cloudsave$EXT
+    else
+        CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_${platform_split[0]}_${platform_split[1]}$EXT -a ./cmd/cli
     fi
 done
