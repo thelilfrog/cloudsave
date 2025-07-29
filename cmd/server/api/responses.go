@@ -101,29 +101,6 @@ func unauthorized(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func forbidden(w http.ResponseWriter, r *http.Request) {
-	e := obj.HTTPError{
-		HTTPCore: obj.HTTPCore{
-			Status:    http.StatusForbidden,
-			Path:      r.RequestURI,
-			Timestamp: time.Now(),
-		},
-		Error:   "Forbidden",
-		Message: "The access is permanently forbidden and tied to the application logic, such as insufficient rights to a resource.",
-	}
-
-	payload, err := json.Marshal(e)
-	if err != nil {
-		log.Println(err)
-	}
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(http.StatusForbidden)
-	_, err = w.Write(payload)
-	if err != nil {
-		log.Println(err)
-	}
-}
-
 func ok(o interface{}, w http.ResponseWriter, r *http.Request) {
 	e := obj.HTTPObject{
 		HTTPCore: obj.HTTPCore{
