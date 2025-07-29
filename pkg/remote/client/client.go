@@ -25,6 +25,14 @@ type (
 		username string
 		password string
 	}
+
+	Information struct {
+		Version        string `json:"version"`
+		APIVersion     int    `json:"api_version"`
+		GoVersion      string `json:"go_version"`
+		OSName         string `json:"os_name"`
+		OSArchitecture string `json:"os_architecture"`
+	}
 )
 
 func New(baseURL, username, password string) *Client {
@@ -64,6 +72,31 @@ func (c *Client) Exists(gameID string) (bool, error) {
 	}
 
 	return false, fmt.Errorf("an error occured: server response: %s", r.Status)
+}
+
+func (c *Client) Version() (Information, error) {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "version")
+	if err != nil {
+		return Information{}, err
+	}
+
+	o, err := c.get(u)
+	if err != nil {
+		return Information{}, err
+	}
+
+	if info, ok := (o.Data).(map[string]any); ok {
+		i := Information{
+			Version:        info["version"].(string),
+			APIVersion:     int(info["api_version"].(float64)),
+			GoVersion:      info["go_version"].(string),
+			OSName:         info["os_name"].(string),
+			OSArchitecture: info["os_architecture"].(string),
+		}
+		return i, nil
+	}
+
+	return Information{}, errors.New("invalid payload sent by the server")
 }
 
 func (c *Client) Hash(gameID string) (string, error) {

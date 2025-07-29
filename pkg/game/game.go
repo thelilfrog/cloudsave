@@ -68,6 +68,29 @@ func Add(name, path string) (Metadata, error) {
 	return m, nil
 }
 
+func Register(m Metadata, path string) error {
+	m.Path = path
+
+	err := os.MkdirAll(filepath.Join(datastorepath, m.ID), 0740)
+	if err != nil {
+		panic("cannot make directory for the game:" + err.Error())
+	}
+
+	f, err := os.OpenFile(filepath.Join(datastorepath, m.ID, "metadata.json"), os.O_CREATE|os.O_WRONLY, 0740)
+	if err != nil {
+		return fmt.Errorf("cannot open the metadata file in the datastore: %w", err)
+	}
+	defer f.Close()
+
+	e := json.NewEncoder(f)
+	err = e.Encode(m)
+	if err != nil {
+		return fmt.Errorf("cannot write into the metadata file in the datastore: %w", err)
+	}
+
+	return nil
+}
+
 func All() ([]Metadata, error) {
 	ds, err := os.ReadDir(datastorepath)
 	if err != nil {

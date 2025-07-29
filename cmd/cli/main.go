@@ -3,6 +3,7 @@ package main
 import (
 	"cloudsave/cmd/cli/commands/add"
 	"cloudsave/cmd/cli/commands/list"
+	"cloudsave/cmd/cli/commands/pull"
 	"cloudsave/cmd/cli/commands/remote"
 	"cloudsave/cmd/cli/commands/remove"
 	"cloudsave/cmd/cli/commands/run"
@@ -28,6 +29,7 @@ func main() {
 
 	subcommands.Register(&remote.RemoteCmd{}, "remote")
 	subcommands.Register(&sync.SyncCmd{}, "remote")
+	subcommands.Register(&pull.PullCmd{}, "remote")
 
 	flag.Parse()
 	ctx := context.Background()
