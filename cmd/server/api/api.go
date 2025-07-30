@@ -61,11 +61,14 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 					// Data routes
 					gamesRouter.Group(func(saveRouter chi.Router) {
 						saveRouter.Post("/{id}/data", s.upload)
-						saveRouter.Post("/{id}/hist/{uuid}/data", s.histUpload)
-						saveRouter.Get("/{id}/hist/{uuid}/info", s.histExists)
 						saveRouter.Get("/{id}/data", s.download)
 						saveRouter.Get("/{id}/hash", s.hash)
 						saveRouter.Get("/{id}/metadata", s.metadata)
+
+						saveRouter.Get("/{id}/hist", s.allHist)
+						saveRouter.Post("/{id}/hist/{uuid}/data", s.histUpload)
+						saveRouter.Get("/{id}/hist/{uuid}/data", s.histDownload)
+						saveRouter.Get("/{id}/hist/{uuid}/info", s.histExists)
 					})
 				})
 			})
@@ -211,6 +214,35 @@ func (s HTTPServer) upload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
+func (s HTTPServer) allHist(w http.ResponseWriter, r *http.Request) {
+	gameID := chi.URLParam(r, "id")
+	path := filepath.Join(s.documentRoot, "data", gameID, "hist")
+	datastore := make([]string, 0)
+
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			ok(datastore, w, r)
+			return
+		}
+		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
+		internalServerError(w, r)
+		return
+	}
+
+	ds, err := os.ReadDir(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
+		internalServerError(w, r)
+		return
+	}
+
+	for _, d := range ds {
+		datastore = append(datastore, d.Name())
+	}
+
+	ok(datastore, w, r)
+}
+
 func (s HTTPServer) histUpload(w http.ResponseWriter, r *http.Request) {
 	const (
 		sizeLimit int64 = 500 << 20 // 500 MB
@@ -247,6 +279,48 @@ func (s HTTPServer) histUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Respond success
 	w.WriteHeader(http.StatusCreated)
+}
+
+func (s HTTPServer) histDownload(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	uuid := chi.URLParam(r, "uuid")
+	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id, "hist", uuid))
+
+	sdir, err := os.Stat(path)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+
+	if !sdir.IsDir() {
+		notFound("id not found", w, r)
+		return
+	}
+
+	path = filepath.Join(path, "data.tar.gz")
+
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+	defer f.Close()
+
+	// Get file info to set headers
+	fi, err := f.Stat()
+	if err != nil || fi.IsDir() {
+		internalServerError(w, r)
+		return
+	}
+
+	// Set headers
+	w.Header().Set("Content-Disposition", "attachment; filename=\"data.tar.gz\"")
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
+	w.WriteHeader(200)
+
+	// Stream the file content
+	http.ServeContent(w, r, "data.tar.gz", fi.ModTime(), f)
 }
 
 func (s HTTPServer) histExists(w http.ResponseWriter, r *http.Request) {

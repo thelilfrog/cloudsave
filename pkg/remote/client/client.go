@@ -163,6 +163,28 @@ func (c *Client) PushBackup(archiveMetadata repository.Backup, m repository.Meta
 	return c.push(u, archiveMetadata.ArchivePath, m)
 }
 
+func (c *Client) ListArchives(gameID string) ([]string, error) {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "hist")
+	if err != nil {
+		return nil, err
+	}
+
+	o, err := c.get(u)
+	if err != nil {
+		return nil, err
+	}
+
+	if m, ok := (o.Data).([]any); ok {
+		var res []string
+		for _, uuid := range m {
+			res = append(res, uuid.(string))
+		}
+		return res, nil
+	}
+
+	return nil, errors.New("invalid payload sent by the server")
+}
+
 func (c *Client) ArchiveInfo(gameID, uuid string) (repository.Backup, error) {
 	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "hist", uuid, "info")
 	if err != nil {
@@ -188,6 +210,54 @@ func (c *Client) ArchiveInfo(gameID, uuid string) (repository.Backup, error) {
 
 func (c *Client) Pull(gameID, archivePath string) error {
 	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "data")
+	if err != nil {
+		return err
+	}
+
+	cli := http.Client{}
+
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return err
+	}
+
+	req.SetBasicAuth(c.username, c.password)
+
+	f, err := os.OpenFile(archivePath+".part", os.O_CREATE|os.O_WRONLY, 0740)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer f.Close()
+
+	res, err := cli.Do(req)
+	if err != nil {
+		return fmt.Errorf("cannot connect to remote: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("cannot connect to remote: server return code: %s", res.Status)
+	}
+
+	bar := progressbar.DefaultBytes(
+		res.ContentLength,
+		"Pulling...",
+	)
+	defer bar.Close()
+
+	if _, err := io.Copy(io.MultiWriter(f, bar), res.Body); err != nil {
+		return fmt.Errorf("an error occured while copying the file from the remote: %w", err)
+	}
+
+	if err := os.Rename(archivePath+".part", archivePath); err != nil {
+		return fmt.Errorf("failed to move temporary data: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Client) PullBackup(gameID, uuid, archivePath string) error {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "hist", uuid, "data")
 	if err != nil {
 		return err
 	}

@@ -53,8 +53,10 @@ func (p *RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 			fmt.Fprintf(os.Stderr, "error: cannot process the data of %s: %s\n", metadata.ID, err)
 			return subcommands.ExitFailure
 		}
+		fmt.Println("✅", metadata.Name)
 	}
 
+	fmt.Println("done.")
 	return subcommands.ExitSuccess
 }
 
@@ -63,7 +65,13 @@ func (p *RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 // After archiving, it updates stateFile to the current time.
 func archiveIfChanged(gameID, srcDir, destTarGz, stateFile string) error {
 	pg := progressbar.New(-1)
-	defer pg.Close()
+	destroyPg := func() {
+		pg.Finish()
+		pg.Clear()
+		pg.Close()
+
+	}
+	defer destroyPg()
 
 	pg.Describe("Scanning " + gameID + "...")
 
@@ -103,7 +111,7 @@ func archiveIfChanged(gameID, srcDir, destTarGz, stateFile string) error {
 
 	// make a backup
 	pg.Describe("Backup current data...")
-	if err := repository.Archive(gameID); err != nil {
+	if err := repository.MakeArchive(gameID); err != nil {
 		return fmt.Errorf("failed to archive data: %w", err)
 	}
 
