@@ -35,6 +35,10 @@ type (
 	}
 )
 
+var (
+	ErrNotFound error = errors.New("not found")
+)
+
 func New(baseURL, username, password string) *Client {
 	return &Client{
 		baseURL:  baseURL,
@@ -141,59 +145,45 @@ func (c *Client) Metadata(gameID string) (repository.Metadata, error) {
 	return repository.Metadata{}, errors.New("invalid payload sent by the server")
 }
 
-func (c *Client) Push(gameID, archivePath string, m repository.Metadata) error {
-	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "data")
+func (c *Client) PushSave(archivePath string, m repository.Metadata) error {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", m.ID, "data")
 	if err != nil {
 		return err
 	}
 
-	f, err := os.OpenFile(archivePath, os.O_RDONLY, 0)
-	if err != nil {
-		return fmt.Errorf("failed to open file: %w", err)
-	}
-	defer f.Close()
+	return c.push(u, archivePath, m)
+}
 
-	buf := new(bytes.Buffer)
-	writer := multipart.NewWriter(buf)
-
-	part, err := writer.CreateFormFile("payload", "data.tar.gz")
+func (c *Client) PushBackup(archiveMetadata repository.Backup, m repository.Metadata) error {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", m.ID, "hist", archiveMetadata.UUID, "data")
 	if err != nil {
 		return err
 	}
 
-	if _, err := io.Copy(part, f); err != nil {
-		return fmt.Errorf("failed to copy data: %w", err)
-	}
+	return c.push(u, archiveMetadata.ArchivePath, m)
+}
 
-	writer.WriteField("name", m.Name)
-	writer.WriteField("version", strconv.Itoa(m.Version))
-	writer.WriteField("date", m.Date.Format(time.RFC3339))
-
-	if err := writer.Close(); err != nil {
-		return err
-	}
-
-	cli := http.Client{}
-
-	req, err := http.NewRequest("POST", u, buf)
+func (c *Client) ArchiveInfo(gameID, uuid string) (repository.Backup, error) {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "hist", uuid, "info")
 	if err != nil {
-		return err
+		return repository.Backup{}, err
 	}
 
-	req.SetBasicAuth(c.username, c.password)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	res, err := cli.Do(req)
+	o, err := c.get(u)
 	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != 201 {
-		return fmt.Errorf("server returns an unexpected status code: %s (expected 201)", res.Status)
+		return repository.Backup{}, err
 	}
 
-	return nil
+	if m, ok := (o.Data).(map[string]any); ok {
+		b := repository.Backup{
+			UUID:      m["uuid"].(string),
+			CreatedAt: customtime.MustParse(time.RFC3339, m["created_at"].(string)),
+			MD5:       m["md5"].(string),
+		}
+		return b, nil
+	}
+
+	return repository.Backup{}, errors.New("invalid payload sent by the server")
 }
 
 func (c *Client) Pull(gameID, archivePath string) error {
@@ -318,6 +308,10 @@ func (c *Client) get(url string) (obj.HTTPObject, error) {
 	}
 	defer res.Body.Close()
 
+	if res.StatusCode == 404 {
+		return obj.HTTPObject{}, ErrNotFound
+	}
+
 	if res.StatusCode != 200 {
 		return obj.HTTPObject{}, fmt.Errorf("server returns an unexpected status code: %d %s (expected 200)", res.StatusCode, res.Status)
 	}
@@ -330,4 +324,54 @@ func (c *Client) get(url string) (obj.HTTPObject, error) {
 	}
 
 	return httpObject, nil
+}
+
+func (c *Client) push(u, archivePath string, m repository.Metadata) error {
+	f, err := os.OpenFile(archivePath, os.O_RDONLY, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer f.Close()
+
+	buf := new(bytes.Buffer)
+	writer := multipart.NewWriter(buf)
+
+	part, err := writer.CreateFormFile("payload", "data.tar.gz")
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(part, f); err != nil {
+		return fmt.Errorf("failed to copy data: %w", err)
+	}
+
+	writer.WriteField("name", m.Name)
+	writer.WriteField("version", strconv.Itoa(m.Version))
+	writer.WriteField("date", m.Date.Format(time.RFC3339))
+
+	if err := writer.Close(); err != nil {
+		return err
+	}
+
+	cli := http.Client{}
+
+	req, err := http.NewRequest("POST", u, buf)
+	if err != nil {
+		return err
+	}
+
+	req.SetBasicAuth(c.username, c.password)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	res, err := cli.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != 201 {
+		return fmt.Errorf("server returns an unexpected status code: %s (expected 201)", res.Status)
+	}
+
+	return nil
 }

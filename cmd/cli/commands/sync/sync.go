@@ -65,9 +65,12 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		}
 
 		if !exists {
-			if err := push(r.GameID, g, cli); err != nil {
+			if err := push(g, cli); err != nil {
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
+			}
+			if err := pushBackup(g, cli); err != nil {
+				slog.Warn("failed to push backup files", "err", err)
 			}
 			continue
 		}
@@ -96,6 +99,10 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
+		if err := pushBackup(g, cli); err != nil {
+			slog.Warn("failed to push backup files", "err", err)
+		}
+
 		if hlocal == hremote {
 			if vlocal != remoteMetadata.Version {
 				slog.Debug("version is not the same, but the hash is equal. Updating local database")
@@ -109,7 +116,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		}
 
 		if vlocal > remoteMetadata.Version {
-			if err := push(r.GameID, g, cli); err != nil {
+			if err := push(g, cli); err != nil {
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
 			}
@@ -164,7 +171,7 @@ func conflict(gameID string, m, remoteMetadata repository.Metadata, cli *client.
 	switch res {
 	case prompt.My:
 		{
-			if err := push(gameID, m, cli); err != nil {
+			if err := push(m, cli); err != nil {
 				return fmt.Errorf("failed to push: %w", err)
 			}
 		}
@@ -185,10 +192,34 @@ func conflict(gameID string, m, remoteMetadata repository.Metadata, cli *client.
 	return nil
 }
 
-func push(gameID string, m repository.Metadata, cli *client.Client) error {
-	archivePath := filepath.Join(repository.DatastorePath(), gameID, "data.tar.gz")
+func push(m repository.Metadata, cli *client.Client) error {
+	archivePath := filepath.Join(repository.DatastorePath(), m.ID, "data.tar.gz")
 
-	return cli.Push(gameID, archivePath, m)
+	return cli.PushSave(archivePath, m)
+}
+
+func pushBackup(m repository.Metadata, cli *client.Client) error {
+	bs, err := repository.Archives(m.ID)
+	if err != nil {
+		return err
+	}
+
+	for _, b := range bs {
+		binfo, err := cli.ArchiveInfo(m.ID, b.UUID)
+		if err != nil {
+			if !errors.Is(err, client.ErrNotFound) {
+				return fmt.Errorf("failed to get remote information about the backup file: %w", err)
+			}
+		}
+
+		if binfo.MD5 != b.MD5 {
+			if err := cli.PushBackup(b, m); err != nil {
+				return fmt.Errorf("failed to push backup: %w", err)
+			}
+		}
+
+	}
+	return nil
 }
 
 func pull(gameID string, cli *client.Client) error {

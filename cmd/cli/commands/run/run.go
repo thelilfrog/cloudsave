@@ -37,11 +37,7 @@ func (p *RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 		return subcommands.ExitFailure
 	}
 
-	pg := progressbar.New(len(datastore))
-	defer pg.Close()
-
 	for _, metadata := range datastore {
-		pg.Describe("Scanning " + metadata.Name + "...")
 		metadataPath := filepath.Join(repository.DatastorePath(), metadata.ID)
 		//todo transaction
 		err := archiveIfChanged(metadata.ID, metadata.Path, filepath.Join(metadataPath, "data.tar.gz"), filepath.Join(metadataPath, ".last_run"))
@@ -57,10 +53,7 @@ func (p *RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 			fmt.Fprintf(os.Stderr, "error: cannot process the data of %s: %s\n", metadata.ID, err)
 			return subcommands.ExitFailure
 		}
-		pg.Add(1)
 	}
-
-	pg.Finish()
 
 	return subcommands.ExitSuccess
 }
@@ -69,6 +62,11 @@ func (p *RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 // in srcDir has a modification time > the last run time stored in stateFile.
 // After archiving, it updates stateFile to the current time.
 func archiveIfChanged(gameID, srcDir, destTarGz, stateFile string) error {
+	pg := progressbar.New(-1)
+	defer pg.Close()
+
+	pg.Describe("Scanning " + gameID + "...")
+
 	// load last run time
 	var lastRun time.Time
 	data, err := os.ReadFile(stateFile)
@@ -99,15 +97,18 @@ func archiveIfChanged(gameID, srcDir, destTarGz, stateFile string) error {
 	}
 
 	if !changed {
+		pg.Finish()
 		return nil
 	}
 
 	// make a backup
+	pg.Describe("Backup current data...")
 	if err := repository.Archive(gameID); err != nil {
 		return fmt.Errorf("failed to archive data: %w", err)
 	}
 
 	// create archive
+	pg.Describe("Archiving new data...")
 	f, err := os.Create(destTarGz)
 	if err != nil {
 		return fmt.Errorf("failed to creating archive file: %w", err)

@@ -73,7 +73,7 @@ func Untar(file io.Reader, path string) error {
 	}
 }
 
-func Tar(file io.Writer, path string) error {
+func Tar(file io.Writer, root string) error {
 	gw := gzip.NewWriter(file)
 	defer gw.Close()
 
@@ -81,34 +81,38 @@ func Tar(file io.Writer, path string) error {
 	defer tw.Close()
 
 	// Walk again to add files
-	err := filepath.Walk(path, func(path string, info os.FileInfo, walkErr error) error {
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
+
+		path, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+
 		// Create tar header
 		header, err := tar.FileInfoHeader(info, path)
 		if err != nil {
 			return err
 		}
-		// Preserve directory structure relative to srcDir
-		relPath, err := filepath.Rel(filepath.Dir(path), path)
-		if err != nil {
-			return err
-		}
-		header.Name = relPath
+		header.Name = path
 
 		if err := tw.WriteHeader(header); err != nil {
 			return err
 		}
-		if info.Mode().IsRegular() {
-			file, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-			if _, err := io.Copy(tw, file); err != nil {
-				return err
-			}
+
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		if _, err := io.Copy(tw, file); err != nil {
+			return err
 		}
 		return nil
 	})

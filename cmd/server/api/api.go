@@ -61,7 +61,8 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 					// Data routes
 					gamesRouter.Group(func(saveRouter chi.Router) {
 						saveRouter.Post("/{id}/data", s.upload)
-						saveRouter.Post("/{id}/hist/data", s.histUpload)
+						saveRouter.Post("/{id}/hist/{uuid}/data", s.histUpload)
+						saveRouter.Get("/{id}/hist/{uuid}/info", s.histExists)
 						saveRouter.Get("/{id}/data", s.download)
 						saveRouter.Get("/{id}/hash", s.hash)
 						saveRouter.Get("/{id}/metadata", s.metadata)
@@ -215,19 +216,14 @@ func (s HTTPServer) histUpload(w http.ResponseWriter, r *http.Request) {
 		sizeLimit int64 = 500 << 20 // 500 MB
 	)
 
-	id := chi.URLParam(r, "id")
-	dt, err := formParseDate("date", r.MultipartForm.Value)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: failed to load payload:", err)
-		badRequest("bad payload", w, r)
-		return
-	}
+	gameID := chi.URLParam(r, "id")
+	uuid := chi.URLParam(r, "uuid")
 
 	// Limit max upload size
 	r.Body = http.MaxBytesReader(w, r.Body, sizeLimit)
 
 	// Parse multipart form
-	err = r.ParseMultipartForm(sizeLimit)
+	err := r.ParseMultipartForm(sizeLimit)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load payload:", err)
 		badRequest("bad payload", w, r)
@@ -243,7 +239,7 @@ func (s HTTPServer) histUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	if err := data.WriteHist(id, s.documentRoot, dt, file); err != nil {
+	if err := data.WriteHist(gameID, s.documentRoot, uuid, file); err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to write file to disk:", err)
 		internalServerError(w, r)
 		return
@@ -251,6 +247,24 @@ func (s HTTPServer) histUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Respond success
 	w.WriteHeader(http.StatusCreated)
+}
+
+func (s HTTPServer) histExists(w http.ResponseWriter, r *http.Request) {
+	gameID := chi.URLParam(r, "id")
+	uuid := chi.URLParam(r, "uuid")
+
+	finfo, err := data.ArchiveInfo(gameID, s.documentRoot, uuid)
+	if err != nil {
+		if errors.Is(err, data.ErrBackupNotExists) {
+			notFound("backup not found", w, r)
+			return
+		}
+		fmt.Fprintln(os.Stderr, "error: failed to read data:", err)
+		internalServerError(w, r)
+		return
+	}
+
+	ok(finfo, w, r)
 }
 
 func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
@@ -373,22 +387,4 @@ func parseFormMetadata(gameID string, values map[string][]string) (repository.Me
 		Name:    name,
 		Date:    date,
 	}, nil
-}
-
-func formParseDate(key string, values map[string][]string) (time.Time, error) {
-	var date time.Time
-	if v, ok := values[key]; ok {
-		if len(v) == 0 {
-			return time.Time{}, fmt.Errorf("error: corrupted metadata")
-		}
-		if v, err := time.Parse(time.RFC3339, v[0]); err == nil {
-			date = v
-		} else {
-			return time.Time{}, err
-		}
-	} else {
-		return time.Time{}, fmt.Errorf("error: cannot find metadata in the form")
-	}
-
-	return date, nil
 }
