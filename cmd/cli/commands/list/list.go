@@ -1,9 +1,9 @@
 package list
 
 import (
-	"cloudsave/pkg/game"
+	"cloudsave/cmd/cli/tools/prompt/credentials"
 	"cloudsave/pkg/remote/client"
-	"cloudsave/pkg/tools/prompt/credentials"
+	"cloudsave/pkg/repository"
 	"context"
 	"flag"
 	"fmt"
@@ -15,6 +15,7 @@ import (
 type (
 	ListCmd struct {
 		remote bool
+		backup bool
 	}
 )
 
@@ -28,6 +29,7 @@ func (*ListCmd) Usage() string {
 
 func (p *ListCmd) SetFlags(f *flag.FlagSet) {
 	f.BoolVar(&p.remote, "a", false, "list all including remote data")
+	f.BoolVar(&p.backup, "include-backup", false, "include backup uuids in the output")
 }
 
 func (p *ListCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
@@ -43,21 +45,21 @@ func (p *ListCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			return subcommands.ExitFailure
 		}
 
-		if err := remote(f.Arg(0), username, password); err != nil {
+		if err := remote(f.Arg(0), username, password, p.backup); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			return subcommands.ExitFailure
 		}
 		return subcommands.ExitSuccess
 	}
-	if err := local(); err != nil {
+	if err := local(p.backup); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return subcommands.ExitFailure
 	}
 	return subcommands.ExitSuccess
 }
 
-func local() error {
-	games, err := game.All()
+func local(includeBackup bool) error {
+	games, err := repository.All()
 	if err != nil {
 		return fmt.Errorf("failed to load datastore: %w", err)
 	}
@@ -66,13 +68,25 @@ func local() error {
 		fmt.Println("ID:", g.ID)
 		fmt.Println("Name:", g.Name)
 		fmt.Println("Last Version:", g.Date, "( Version Number", g.Version, ")")
+		if includeBackup {
+			bk, err := repository.Archives(g.ID)
+			if err != nil {
+				return fmt.Errorf("failed to list backup files: %w", err)
+			}
+			if len(bk) > 0 {
+				fmt.Println("Backup:")
+				for _, b := range bk {
+					fmt.Printf("   - %s (%s)\n", b.UUID, b.CreatedAt)
+				}
+			}
+		}
 		fmt.Println("---")
 	}
 
 	return nil
 }
 
-func remote(url, username, password string) error {
+func remote(url, username, password string, includeBackup bool) error {
 	cli := client.New(url, username, password)
 
 	if err := cli.Ping(); err != nil {
@@ -91,6 +105,22 @@ func remote(url, username, password string) error {
 		fmt.Println("ID:", g.ID)
 		fmt.Println("Name:", g.Name)
 		fmt.Println("Last Version:", g.Date, "( Version Number", g.Version, ")")
+		if includeBackup {
+			bk, err := cli.ListArchives(g.ID)
+			if err != nil {
+				return fmt.Errorf("failed to list backup files: %w", err)
+			}
+			if len(bk) > 0 {
+				fmt.Println("Backup:")
+				for _, uuid := range bk {
+					b, err := cli.ArchiveInfo(g.ID, uuid)
+					if err != nil {
+						return fmt.Errorf("failed to list backup files: %w", err)
+					}
+					fmt.Printf("   - %s (%s)\n", b.UUID, b.CreatedAt)
+				}
+			}
+		}
 		fmt.Println("---")
 	}
 

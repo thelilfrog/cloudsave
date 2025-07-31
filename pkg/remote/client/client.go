@@ -2,8 +2,8 @@ package client
 
 import (
 	"bytes"
-	"cloudsave/pkg/game"
 	"cloudsave/pkg/remote/obj"
+	"cloudsave/pkg/repository"
 	customtime "cloudsave/pkg/tools/time"
 	"encoding/json"
 	"errors"
@@ -33,6 +33,10 @@ type (
 		OSName         string `json:"os_name"`
 		OSArchitecture string `json:"os_architecture"`
 	}
+)
+
+var (
+	ErrNotFound error = errors.New("not found")
 )
 
 func New(baseURL, username, password string) *Client {
@@ -117,19 +121,19 @@ func (c *Client) Hash(gameID string) (string, error) {
 	return "", errors.New("invalid payload sent by the server")
 }
 
-func (c *Client) Metadata(gameID string) (game.Metadata, error) {
+func (c *Client) Metadata(gameID string) (repository.Metadata, error) {
 	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "metadata")
 	if err != nil {
-		return game.Metadata{}, err
+		return repository.Metadata{}, err
 	}
 
 	o, err := c.get(u)
 	if err != nil {
-		return game.Metadata{}, err
+		return repository.Metadata{}, err
 	}
 
 	if m, ok := (o.Data).(map[string]any); ok {
-		gm := game.Metadata{
+		gm := repository.Metadata{
 			ID:      m["id"].(string),
 			Name:    m["name"].(string),
 			Version: int(m["version"].(float64)),
@@ -138,66 +142,122 @@ func (c *Client) Metadata(gameID string) (game.Metadata, error) {
 		return gm, nil
 	}
 
-	return game.Metadata{}, errors.New("invalid payload sent by the server")
+	return repository.Metadata{}, errors.New("invalid payload sent by the server")
 }
 
-func (c *Client) Push(gameID, archivePath string, m game.Metadata) error {
+func (c *Client) PushSave(archivePath string, m repository.Metadata) error {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", m.ID, "data")
+	if err != nil {
+		return err
+	}
+
+	return c.push(u, archivePath, m)
+}
+
+func (c *Client) PushBackup(archiveMetadata repository.Backup, m repository.Metadata) error {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", m.ID, "hist", archiveMetadata.UUID, "data")
+	if err != nil {
+		return err
+	}
+
+	return c.push(u, archiveMetadata.ArchivePath, m)
+}
+
+func (c *Client) ListArchives(gameID string) ([]string, error) {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "hist")
+	if err != nil {
+		return nil, err
+	}
+
+	o, err := c.get(u)
+	if err != nil {
+		return nil, err
+	}
+
+	if m, ok := (o.Data).([]any); ok {
+		var res []string
+		for _, uuid := range m {
+			res = append(res, uuid.(string))
+		}
+		return res, nil
+	}
+
+	return nil, errors.New("invalid payload sent by the server")
+}
+
+func (c *Client) ArchiveInfo(gameID, uuid string) (repository.Backup, error) {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "hist", uuid, "info")
+	if err != nil {
+		return repository.Backup{}, err
+	}
+
+	o, err := c.get(u)
+	if err != nil {
+		return repository.Backup{}, err
+	}
+
+	if m, ok := (o.Data).(map[string]any); ok {
+		b := repository.Backup{
+			UUID:      m["uuid"].(string),
+			CreatedAt: customtime.MustParse(time.RFC3339, m["created_at"].(string)),
+			MD5:       m["md5"].(string),
+		}
+		return b, nil
+	}
+
+	return repository.Backup{}, errors.New("invalid payload sent by the server")
+}
+
+func (c *Client) Pull(gameID, archivePath string) error {
 	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "data")
 	if err != nil {
-		return err
-	}
-
-	f, err := os.OpenFile(archivePath, os.O_RDONLY, 0)
-	if err != nil {
-		return fmt.Errorf("failed to open file: %w", err)
-	}
-	defer f.Close()
-
-	buf := new(bytes.Buffer)
-	writer := multipart.NewWriter(buf)
-
-	part, err := writer.CreateFormFile("payload", "data.tar.gz")
-	if err != nil {
-		return err
-	}
-
-	if _, err := io.Copy(part, f); err != nil {
-		return fmt.Errorf("failed to copy data: %w", err)
-	}
-
-	writer.WriteField("name", m.Name)
-	writer.WriteField("version", strconv.Itoa(m.Version))
-	writer.WriteField("date", m.Date.Format(time.RFC3339))
-
-	if err := writer.Close(); err != nil {
 		return err
 	}
 
 	cli := http.Client{}
 
-	req, err := http.NewRequest("POST", u, buf)
+	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		return err
 	}
 
 	req.SetBasicAuth(c.username, c.password)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	f, err := os.OpenFile(archivePath+".part", os.O_CREATE|os.O_WRONLY, 0740)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer f.Close()
 
 	res, err := cli.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot connect to remote: %w", err)
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode != 201 {
-		return fmt.Errorf("server returns an unexpected status code: %s (expected 201)", res.Status)
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("cannot connect to remote: server return code: %s", res.Status)
+	}
+
+	bar := progressbar.DefaultBytes(
+		res.ContentLength,
+		"Pulling...",
+	)
+	defer bar.Close()
+
+	if _, err := io.Copy(io.MultiWriter(f, bar), res.Body); err != nil {
+		return fmt.Errorf("an error occured while copying the file from the remote: %w", err)
+	}
+
+	if err := os.Rename(archivePath+".part", archivePath); err != nil {
+		return fmt.Errorf("failed to move temporary data: %w", err)
 	}
 
 	return nil
 }
 
-func (c *Client) Pull(gameID, archivePath string) error {
-	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "data")
+func (c *Client) PullBackup(gameID, uuid, archivePath string) error {
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "hist", uuid, "data")
 	if err != nil {
 		return err
 	}
@@ -271,7 +331,7 @@ func (c *Client) Ping() error {
 	return nil
 }
 
-func (c *Client) All() ([]game.Metadata, error) {
+func (c *Client) All() ([]repository.Metadata, error) {
 	u, err := url.JoinPath(c.baseURL, "api", "v1", "games")
 	if err != nil {
 		return nil, err
@@ -283,10 +343,10 @@ func (c *Client) All() ([]game.Metadata, error) {
 	}
 
 	if games, ok := (o.Data).([]any); ok {
-		var res []game.Metadata
+		var res []repository.Metadata
 		for _, g := range games {
 			if v, ok := g.(map[string]any); ok {
-				gm := game.Metadata{
+				gm := repository.Metadata{
 					ID:      v["id"].(string),
 					Name:    v["name"].(string),
 					Version: int(v["version"].(float64)),
@@ -318,6 +378,10 @@ func (c *Client) get(url string) (obj.HTTPObject, error) {
 	}
 	defer res.Body.Close()
 
+	if res.StatusCode == 404 {
+		return obj.HTTPObject{}, ErrNotFound
+	}
+
 	if res.StatusCode != 200 {
 		return obj.HTTPObject{}, fmt.Errorf("server returns an unexpected status code: %d %s (expected 200)", res.StatusCode, res.Status)
 	}
@@ -330,4 +394,54 @@ func (c *Client) get(url string) (obj.HTTPObject, error) {
 	}
 
 	return httpObject, nil
+}
+
+func (c *Client) push(u, archivePath string, m repository.Metadata) error {
+	f, err := os.OpenFile(archivePath, os.O_RDONLY, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer f.Close()
+
+	buf := new(bytes.Buffer)
+	writer := multipart.NewWriter(buf)
+
+	part, err := writer.CreateFormFile("payload", "data.tar.gz")
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(part, f); err != nil {
+		return fmt.Errorf("failed to copy data: %w", err)
+	}
+
+	writer.WriteField("name", m.Name)
+	writer.WriteField("version", strconv.Itoa(m.Version))
+	writer.WriteField("date", m.Date.Format(time.RFC3339))
+
+	if err := writer.Close(); err != nil {
+		return err
+	}
+
+	cli := http.Client{}
+
+	req, err := http.NewRequest("POST", u, buf)
+	if err != nil {
+		return err
+	}
+
+	req.SetBasicAuth(c.username, c.password)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	res, err := cli.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != 201 {
+		return fmt.Errorf("server returns an unexpected status code: %s (expected 201)", res.Status)
+	}
+
+	return nil
 }

@@ -1,10 +1,10 @@
 package pull
 
 import (
-	"cloudsave/pkg/game"
 	"cloudsave/pkg/remote/client"
+	"cloudsave/pkg/repository"
 	"cloudsave/pkg/tools/archive"
-	"cloudsave/pkg/tools/prompt/credentials"
+	"cloudsave/cmd/cli/tools/prompt/credentials"
 	"context"
 	"flag"
 	"fmt"
@@ -54,7 +54,7 @@ func (p *PullCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		return subcommands.ExitFailure
 	}
 
-	archivePath := filepath.Join(game.DatastorePath(), gameID, "data.tar.gz")
+	archivePath := filepath.Join(repository.DatastorePath(), gameID, "data.tar.gz")
 
 	m, err := cli.Metadata(gameID)
 	if err != nil {
@@ -62,7 +62,7 @@ func (p *PullCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		return subcommands.ExitFailure
 	}
 
-	err = game.Register(m, path)
+	err = repository.Register(m, path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to register local metadata: %s", err)
 		return subcommands.ExitFailure

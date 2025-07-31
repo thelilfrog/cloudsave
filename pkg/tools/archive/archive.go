@@ -3,6 +3,7 @@ package archive
 import (
 	"archive/tar"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -70,4 +71,54 @@ func Untar(file io.Reader, path string) error {
 			f.Close()
 		}
 	}
+}
+
+func Tar(file io.Writer, root string) error {
+	gw := gzip.NewWriter(file)
+	defer gw.Close()
+
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+
+	// Walk again to add files
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("failed to walk through the directory: %w", walkErr)
+		}
+
+		relpath, err := filepath.Rel(root, path)
+		if err != nil {
+			return fmt.Errorf("failed to make relative path: %w", err)
+		}
+
+		// Create tar header
+		header, err := tar.FileInfoHeader(info, path)
+		if err != nil {
+			return fmt.Errorf("failed to make file info header: %w", err)
+		}
+		header.Name = relpath
+
+		if err := tw.WriteHeader(header); err != nil {
+			return fmt.Errorf("failed to write header: %w", err)
+		}
+
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("failed to open file: %w", err)
+		}
+		defer file.Close()
+		if _, err := io.Copy(tw, file); err != nil {
+			return fmt.Errorf("failed to copy file: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("writing tar entries: %w", err)
+	}
+
+	return nil
 }

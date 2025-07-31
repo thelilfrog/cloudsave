@@ -2,7 +2,7 @@ package api
 
 import (
 	"cloudsave/cmd/server/data"
-	"cloudsave/pkg/game"
+	"cloudsave/pkg/repository"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -64,6 +64,11 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 						saveRouter.Get("/{id}/data", s.download)
 						saveRouter.Get("/{id}/hash", s.hash)
 						saveRouter.Get("/{id}/metadata", s.metadata)
+
+						saveRouter.Get("/{id}/hist", s.allHist)
+						saveRouter.Post("/{id}/hist/{uuid}/data", s.histUpload)
+						saveRouter.Get("/{id}/hist/{uuid}/data", s.histDownload)
+						saveRouter.Get("/{id}/hist/{uuid}/info", s.histExists)
 					})
 				})
 			})
@@ -78,7 +83,7 @@ func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServ
 
 func (s HTTPServer) all(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(s.documentRoot, "data")
-	datastore := make([]game.Metadata, 0)
+	datastore := make([]repository.Metadata, 0)
 
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -104,7 +109,7 @@ func (s HTTPServer) all(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		var m game.Metadata
+		var m repository.Metadata
 		err = json.Unmarshal(content, &m)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "corrupted datastore: failed to parse %s/metadata.json: %s", d.Name(), err)
@@ -209,6 +214,133 @@ func (s HTTPServer) upload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
+func (s HTTPServer) allHist(w http.ResponseWriter, r *http.Request) {
+	gameID := chi.URLParam(r, "id")
+	path := filepath.Join(s.documentRoot, "data", gameID, "hist")
+	datastore := make([]string, 0)
+
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			ok(datastore, w, r)
+			return
+		}
+		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
+		internalServerError(w, r)
+		return
+	}
+
+	ds, err := os.ReadDir(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
+		internalServerError(w, r)
+		return
+	}
+
+	for _, d := range ds {
+		datastore = append(datastore, d.Name())
+	}
+
+	ok(datastore, w, r)
+}
+
+func (s HTTPServer) histUpload(w http.ResponseWriter, r *http.Request) {
+	const (
+		sizeLimit int64 = 500 << 20 // 500 MB
+	)
+
+	gameID := chi.URLParam(r, "id")
+	uuid := chi.URLParam(r, "uuid")
+
+	// Limit max upload size
+	r.Body = http.MaxBytesReader(w, r.Body, sizeLimit)
+
+	// Parse multipart form
+	err := r.ParseMultipartForm(sizeLimit)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to load payload:", err)
+		badRequest("bad payload", w, r)
+		return
+	}
+
+	// Retrieve file
+	file, _, err := r.FormFile("payload")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: cannot find payload in the form:", err)
+		badRequest("payload not found", w, r)
+		return
+	}
+	defer file.Close()
+
+	if err := data.WriteHist(gameID, s.documentRoot, uuid, file); err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to write file to disk:", err)
+		internalServerError(w, r)
+		return
+	}
+
+	// Respond success
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (s HTTPServer) histDownload(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	uuid := chi.URLParam(r, "uuid")
+	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id, "hist", uuid))
+
+	sdir, err := os.Stat(path)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+
+	if !sdir.IsDir() {
+		notFound("id not found", w, r)
+		return
+	}
+
+	path = filepath.Join(path, "data.tar.gz")
+
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		notFound("id not found", w, r)
+		return
+	}
+	defer f.Close()
+
+	// Get file info to set headers
+	fi, err := f.Stat()
+	if err != nil || fi.IsDir() {
+		internalServerError(w, r)
+		return
+	}
+
+	// Set headers
+	w.Header().Set("Content-Disposition", "attachment; filename=\"data.tar.gz\"")
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
+	w.WriteHeader(200)
+
+	// Stream the file content
+	http.ServeContent(w, r, "data.tar.gz", fi.ModTime(), f)
+}
+
+func (s HTTPServer) histExists(w http.ResponseWriter, r *http.Request) {
+	gameID := chi.URLParam(r, "id")
+	uuid := chi.URLParam(r, "uuid")
+
+	finfo, err := data.ArchiveInfo(gameID, s.documentRoot, uuid)
+	if err != nil {
+		if errors.Is(err, data.ErrBackupNotExists) {
+			notFound("backup not found", w, r)
+			return
+		}
+		fmt.Fprintln(os.Stderr, "error: failed to read data:", err)
+		internalServerError(w, r)
+		return
+	}
+
+	ok(finfo, w, r)
+}
+
 func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id))
@@ -272,7 +404,7 @@ func (s HTTPServer) metadata(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	var metadata game.Metadata
+	var metadata repository.Metadata
 	d := json.NewDecoder(f)
 	err = d.Decode(&metadata)
 	if err != nil {
@@ -284,46 +416,46 @@ func (s HTTPServer) metadata(w http.ResponseWriter, r *http.Request) {
 	ok(metadata, w, r)
 }
 
-func parseFormMetadata(gameID string, values map[string][]string) (game.Metadata, error) {
+func parseFormMetadata(gameID string, values map[string][]string) (repository.Metadata, error) {
 	var name string
 	if v, ok := values["name"]; ok {
 		if len(v) == 0 {
-			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
+			return repository.Metadata{}, fmt.Errorf("error: corrupted metadata")
 		}
 		name = v[0]
 	} else {
-		return game.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
+		return repository.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
 	}
 
 	var version int
 	if v, ok := values["version"]; ok {
 		if len(v) == 0 {
-			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
+			return repository.Metadata{}, fmt.Errorf("error: corrupted metadata")
 		}
 		if v, err := strconv.Atoi(v[0]); err == nil {
 			version = v
 		} else {
-			return game.Metadata{}, err
+			return repository.Metadata{}, err
 		}
 	} else {
-		return game.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
+		return repository.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
 	}
 
 	var date time.Time
 	if v, ok := values["date"]; ok {
 		if len(v) == 0 {
-			return game.Metadata{}, fmt.Errorf("error: corrupted metadata")
+			return repository.Metadata{}, fmt.Errorf("error: corrupted metadata")
 		}
 		if v, err := time.Parse(time.RFC3339, v[0]); err == nil {
 			date = v
 		} else {
-			return game.Metadata{}, err
+			return repository.Metadata{}, err
 		}
 	} else {
-		return game.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
+		return repository.Metadata{}, fmt.Errorf("error: cannot find metadata in the form")
 	}
 
-	return game.Metadata{
+	return repository.Metadata{
 		ID:      gameID,
 		Version: version,
 		Name:    name,

@@ -1,9 +1,9 @@
 package remote
 
 import (
-	"cloudsave/pkg/game"
 	"cloudsave/pkg/remote"
 	"cloudsave/pkg/remote/client"
+	"cloudsave/pkg/repository"
 	"context"
 	"flag"
 	"fmt"
@@ -62,7 +62,7 @@ func (p *RemoteCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interface
 }
 
 func list() error {
-	games, err := game.All()
+	games, err := repository.All()
 	if err != nil {
 		return fmt.Errorf("failed to load datastore: %w", err)
 	}

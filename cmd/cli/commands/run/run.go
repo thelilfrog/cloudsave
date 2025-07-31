@@ -1,9 +1,8 @@
 package run
 
 import (
-	"archive/tar"
-	"cloudsave/pkg/game"
-	"compress/gzip"
+	"cloudsave/pkg/repository"
+	"cloudsave/pkg/tools/archive"
 	"context"
 	"flag"
 	"fmt"
@@ -32,49 +31,55 @@ func (*RunCmd) Usage() string {
 func (p *RunCmd) SetFlags(f *flag.FlagSet) {}
 
 func (p *RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
-	datastore, err := game.All()
+	datastore, err := repository.All()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load datastore:", err)
 		return subcommands.ExitFailure
 	}
 
-	pg := progressbar.New(len(datastore))
-	defer pg.Close()
-
 	for _, metadata := range datastore {
-		pg.Describe("Scanning " + metadata.Name + "...")
-		metadataPath := filepath.Join(game.DatastorePath(), metadata.ID)
+		metadataPath := filepath.Join(repository.DatastorePath(), metadata.ID)
 		//todo transaction
 		err := archiveIfChanged(metadata.ID, metadata.Path, filepath.Join(metadataPath, "data.tar.gz"), filepath.Join(metadataPath, ".last_run"))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: cannot process the data of %s: %s\n", metadata.ID, err)
 			return subcommands.ExitFailure
 		}
-		if err := game.SetVersion(metadata.ID, metadata.Version+1); err != nil {
+		if err := repository.SetVersion(metadata.ID, metadata.Version+1); err != nil {
 			fmt.Fprintf(os.Stderr, "error: cannot process the data of %s: %s\n", metadata.ID, err)
 			return subcommands.ExitFailure
 		}
-		if err := game.SetDate(metadata.ID, time.Now()); err != nil {
+		if err := repository.SetDate(metadata.ID, time.Now()); err != nil {
 			fmt.Fprintf(os.Stderr, "error: cannot process the data of %s: %s\n", metadata.ID, err)
 			return subcommands.ExitFailure
 		}
-		pg.Add(1)
+		fmt.Println("✅", metadata.Name)
 	}
 
-	pg.Finish()
-
+	fmt.Println("done.")
 	return subcommands.ExitSuccess
 }
 
 // archiveIfChanged will archive srcDir into destTarGz only if any file
 // in srcDir has a modification time > the last run time stored in stateFile.
 // After archiving, it updates stateFile to the current time.
-func archiveIfChanged(id, srcDir, destTarGz, stateFile string) error {
-	// 1) Load last run time
+func archiveIfChanged(gameID, srcDir, destTarGz, stateFile string) error {
+	pg := progressbar.New(-1)
+	destroyPg := func() {
+		pg.Finish()
+		pg.Clear()
+		pg.Close()
+
+	}
+	defer destroyPg()
+
+	pg.Describe("Scanning " + gameID + "...")
+
+	// load last run time
 	var lastRun time.Time
 	data, err := os.ReadFile(stateFile)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("reading state file: %w", err)
+		return fmt.Errorf("failed to reading state file: %w", err)
 	}
 	if err == nil {
 		lastRun, err = time.Parse(time.RFC3339, string(data))
@@ -83,7 +88,7 @@ func archiveIfChanged(id, srcDir, destTarGz, stateFile string) error {
 		}
 	}
 
-	// 2) Check for changes
+	// check for changes
 	changed := false
 	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
@@ -96,63 +101,32 @@ func archiveIfChanged(id, srcDir, destTarGz, stateFile string) error {
 		return nil
 	})
 	if err != nil && err != io.EOF {
-		return fmt.Errorf("scanning source directory: %w", err)
+		return fmt.Errorf("failed to scanning source directory: %w", err)
 	}
 
 	if !changed {
+		pg.Finish()
 		return nil
 	}
 
-	// 3) Create tar.gz
+	// make a backup
+	pg.Describe("Backup current data...")
+	if err := repository.MakeArchive(gameID); err != nil {
+		return fmt.Errorf("failed to archive data: %w", err)
+	}
+
+	// create archive
+	pg.Describe("Archiving new data...")
 	f, err := os.Create(destTarGz)
 	if err != nil {
-		return fmt.Errorf("creating archive file: %w", err)
+		return fmt.Errorf("failed to creating archive file: %w", err)
 	}
 	defer f.Close()
 
-	gw := gzip.NewWriter(f)
-	defer gw.Close()
-
-	tw := tar.NewWriter(gw)
-	defer tw.Close()
-
-	// Walk again to add files
-	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		// Create tar header
-		header, err := tar.FileInfoHeader(info, path)
-		if err != nil {
-			return err
-		}
-		// Preserve directory structure relative to srcDir
-		relPath, err := filepath.Rel(filepath.Dir(srcDir), path)
-		if err != nil {
-			return err
-		}
-		header.Name = relPath
-
-		if err := tw.WriteHeader(header); err != nil {
-			return err
-		}
-		if info.Mode().IsRegular() {
-			file, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-			if _, err := io.Copy(tw, file); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("writing tar entries: %w", err)
+	if err := archive.Tar(f, srcDir); err != nil {
+		return fmt.Errorf("failed archiving files: %w", err)
 	}
 
-	// 4) Update state file
 	now := time.Now().UTC().Format(time.RFC3339)
 	if err := os.WriteFile(stateFile, []byte(now), 0644); err != nil {
 		return fmt.Errorf("updating state file: %w", err)

@@ -1,15 +1,17 @@
-package game
+package repository
 
 import (
+	"cloudsave/pkg/tools/hash"
 	"cloudsave/pkg/tools/id"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type (
@@ -19,6 +21,13 @@ type (
 		Path    string    `json:"path"`
 		Version int       `json:"version"`
 		Date    time.Time `json:"date"`
+	}
+
+	Backup struct {
+		CreatedAt   time.Time `json:"created_at"`
+		MD5         string    `json:"md5"`
+		UUID        string    `json:"uuid"`
+		ArchivePath string    `json:"-"`
 	}
 )
 
@@ -135,6 +144,136 @@ func One(gameID string) (Metadata, error) {
 	return m, nil
 }
 
+func MakeArchive(gameID string) error {
+	path := filepath.Join(datastorepath, gameID, "data.tar.gz")
+
+	// open old
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("failed to open old file: %w", err)
+	}
+	defer f.Close()
+
+	histDirPath := filepath.Join(datastorepath, gameID, "hist", uuid.NewString())
+	if err := os.MkdirAll(histDirPath, 0740); err != nil {
+		return fmt.Errorf("failed to make directory: %w", err)
+	}
+
+	// open new
+	nf, err := os.OpenFile(filepath.Join(histDirPath, "data.tar.gz"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
+	if err != nil {
+		return fmt.Errorf("failed to open new file: %w", err)
+	}
+	defer nf.Close()
+
+	// copy
+	if _, err := io.Copy(nf, f); err != nil {
+		return fmt.Errorf("failed to copy data: %w", err)
+	}
+
+	return nil
+}
+
+func RestoreArchive(gameID, uuid string) error {
+	histDirPath := filepath.Join(datastorepath, gameID, "hist", uuid)
+	if err := os.MkdirAll(histDirPath, 0740); err != nil {
+		return fmt.Errorf("failed to make directory: %w", err)
+	}
+
+	// open old
+	nf, err := os.OpenFile(filepath.Join(histDirPath, "data.tar.gz"), os.O_RDONLY, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open new file: %w", err)
+	}
+	defer nf.Close()
+
+	path := filepath.Join(datastorepath, gameID, "data.tar.gz")
+
+	// open new
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("failed to open old file: %w", err)
+	}
+	defer f.Close()
+
+	// copy
+	if _, err := io.Copy(f, nf); err != nil {
+		return fmt.Errorf("failed to copy data: %w", err)
+	}
+
+	return nil
+}
+
+func Archive(gameID, uuid string) (Backup, error) {
+	histDirPath := filepath.Join(datastorepath, gameID, "hist", uuid)
+	if err := os.MkdirAll(histDirPath, 0740); err != nil {
+		return Backup{}, fmt.Errorf("failed to make 'hist' directory")
+	}
+
+	finfo, err := os.Stat(histDirPath)
+	if err != nil {
+		return Backup{}, fmt.Errorf("corrupted datastore: %w", err)
+	}
+	archivePath := filepath.Join(histDirPath, "data.tar.gz")
+
+	h, err := hash.FileMD5(archivePath)
+	if err != nil {
+		return Backup{}, fmt.Errorf("failed to calculate md5 hash: %w", err)
+	}
+
+	b := Backup{
+		CreatedAt:   finfo.ModTime(),
+		UUID:        filepath.Base(finfo.Name()),
+		MD5:         h,
+		ArchivePath: archivePath,
+	}
+
+	return b, nil
+}
+
+func Archives(gameID string) ([]Backup, error) {
+	histDirPath := filepath.Join(datastorepath, gameID, "hist")
+	if err := os.MkdirAll(histDirPath, 0740); err != nil {
+		return nil, fmt.Errorf("failed to make 'hist' directory")
+	}
+
+	d, err := os.ReadDir(histDirPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open 'hist' directory")
+	}
+
+	var res []Backup
+	for _, f := range d {
+		finfo, err := f.Info()
+		if err != nil {
+			return nil, fmt.Errorf("corrupted datastore: %w", err)
+		}
+		path := filepath.Join(histDirPath, finfo.Name())
+		archivePath := filepath.Join(path, "data.tar.gz")
+
+		h, err := hash.FileMD5(archivePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to calculate md5 hash: %w", err)
+		}
+
+		b := Backup{
+			CreatedAt:   finfo.ModTime(),
+			UUID:        filepath.Base(finfo.Name()),
+			MD5:         h,
+			ArchivePath: archivePath,
+		}
+
+		res = append(res, b)
+	}
+	return res, nil
+}
+
 func DatastorePath() string {
 	return datastorepath
 }
@@ -150,18 +289,7 @@ func Remove(gameID string) error {
 func Hash(gameID string) (string, error) {
 	path := filepath.Join(datastorepath, gameID, "data.tar.gz")
 
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	hasher := md5.New()
-	if _, err := io.Copy(hasher, f); err != nil {
-		return "", err
-	}
-	sum := hasher.Sum(nil)
-	return hex.EncodeToString(sum), nil
+	return hash.FileMD5(path)
 }
 
 func Version(gameID string) (int, error) {

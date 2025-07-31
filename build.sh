@@ -1,7 +1,7 @@
 #!/bin/bash
 
 MAKE_PACKAGE=false
-VERSION=0.0.1
+VERSION=0.0.2
 
 usage() {
  echo "Usage: $0 [OPTIONS]"
@@ -51,7 +51,7 @@ for platform in "${platforms[@]}"; do
         tar -czf build/server_${platform_split[0]}_${platform_split[1]}.tar.gz build/cloudsave_server$EXT
         rm build/cloudsave_server$EXT
     else
-      CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_server_${platform_split[0]}_${platform_split[1]}$EXT -a ./cmd/cli
+      CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_server_${platform_split[0]}_${platform_split[1]}$EXT -a ./cmd/server
     fi
 done
 
