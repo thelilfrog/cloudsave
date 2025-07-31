@@ -83,23 +83,23 @@ func Tar(file io.Writer, root string) error {
 	// Walk again to add files
 	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
-			return walkErr
+			return fmt.Errorf("failed to walk through the directory: %w", walkErr)
 		}
 
-		path, err := filepath.Rel(root, path)
+		relpath, err := filepath.Rel(root, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to make relative path: %w", err)
 		}
 
 		// Create tar header
 		header, err := tar.FileInfoHeader(info, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to make file info header: %w", err)
 		}
-		header.Name = path
+		header.Name = relpath
 
 		if err := tw.WriteHeader(header); err != nil {
-			return err
+			return fmt.Errorf("failed to write header: %w", err)
 		}
 
 		if !info.Mode().IsRegular() {
@@ -108,11 +108,11 @@ func Tar(file io.Writer, root string) error {
 
 		file, err := os.Open(path)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to open file: %w", err)
 		}
 		defer file.Close()
 		if _, err := io.Copy(tw, file); err != nil {
-			return err
+			return fmt.Errorf("failed to copy file: %w", err)
 		}
 		return nil
 	})

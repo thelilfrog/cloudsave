@@ -124,7 +124,7 @@ func archiveIfChanged(gameID, srcDir, destTarGz, stateFile string) error {
 	defer f.Close()
 
 	if err := archive.Tar(f, srcDir); err != nil {
-		return fmt.Errorf("failed archiving files")
+		return fmt.Errorf("failed archiving files: %w", err)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
