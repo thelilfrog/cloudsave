@@ -70,7 +70,7 @@ for platform in "${platforms[@]}"; do
 
     if [ "$MAKE_PACKAGE" == "true" ]; then
         CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_web$EXT -a ./cmd/web
-        tar -czf build/server_${platform_split[0]}_${platform_split[1]}.tar.gz build/cloudsave_web$EXT
+        tar -czf build/web_${platform_split[0]}_${platform_split[1]}.tar.gz build/cloudsave_web$EXT
         rm build/cloudsave_web$EXT
     else
       CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_web_${platform_split[0]}_${platform_split[1]}$EXT -a ./cmd/web
