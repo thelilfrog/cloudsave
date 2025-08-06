@@ -2,7 +2,7 @@
 
 The software is still in alpha.
 
-A client/server for keeping not synced games (like emulator, old games...) up-to-date using multiple computers
+A client/server that allows unsynchronized games (such as emulators, old games, etc.) to be kept up to date on multiple computers.
 
 ## Build
 
