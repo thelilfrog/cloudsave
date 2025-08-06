@@ -2,7 +2,7 @@
 
 The software is still in alpha.
 
-It is a small tool that simulates a backup in the “cloud”
+A client/server for keeping not synced games (like emulator, old games...) up-to-date using multiple computers
 
 ## Build
 
