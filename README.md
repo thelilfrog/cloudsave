@@ -21,7 +21,7 @@ e.g.:
 test:$2y$10$uULsuyROe3LVdTzFoBH7HO0zhvyKp6CX2FDNl7quXMFYqzitU0kc.
 ```
 
-The default path to this directory is `/var/lib/cloudsave`, this can be changed with the `-config` argument
+The default path to this directory is `/var/lib/cloudsave`, this can be changed with the `-document-root` argument
 
 ### Client
 
