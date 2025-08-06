@@ -1,4 +1,7 @@
 /cli
 /server
+/web
 /env/
 /build/
+*.exe
+/config.json

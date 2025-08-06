@@ -36,7 +36,8 @@ type (
 )
 
 var (
-	ErrNotFound error = errors.New("not found")
+	ErrNotFound     error = errors.New("not found")
+	ErrUnauthorized error = errors.New("unauthorized (HTTP Error 401)")
 )
 
 func New(baseURL, username, password string) *Client {
@@ -380,6 +381,10 @@ func (c *Client) get(url string) (obj.HTTPObject, error) {
 
 	if res.StatusCode == 404 {
 		return obj.HTTPObject{}, ErrNotFound
+	}
+
+	if res.StatusCode == 401 {
+		return obj.HTTPObject{}, ErrUnauthorized
 	}
 
 	if res.StatusCode != 200 {
