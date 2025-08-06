@@ -20,8 +20,9 @@ type (
 func (*ListCmd) Name() string     { return "apply" }
 func (*ListCmd) Synopsis() string { return "apply a backup" }
 func (*ListCmd) Usage() string {
-	return `apply:
-  Apply a backup
+	return `Usage: cloudsave apply <GAME_ID> <BACKUP_ID>
+
+Apply a backup
 `
 }
 

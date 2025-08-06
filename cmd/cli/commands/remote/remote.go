@@ -20,10 +20,17 @@ type (
 )
 
 func (*RemoteCmd) Name() string     { return "remote" }
-func (*RemoteCmd) Synopsis() string { return "manage remote" }
+func (*RemoteCmd) Synopsis() string { return "add or update the remote url" }
 func (*RemoteCmd) Usage() string {
-	return `remote:
-  manage remove
+	return `Usage: cloudsave remote <-set|-list>
+
+The -list argument lists all remotes for each registered game.
+This command performs a connection test.
+
+The -set argument allow you to set (create or update) 
+the URL to the remote for a game
+
+Options
 `
 }
 
