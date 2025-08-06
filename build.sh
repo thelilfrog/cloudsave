@@ -1,7 +1,7 @@
 #!/bin/bash
 
 MAKE_PACKAGE=false
-VERSION=0.0.2
+VERSION=0.0.3
 
 usage() {
  echo "Usage: $0 [OPTIONS]"
@@ -52,6 +52,28 @@ for platform in "${platforms[@]}"; do
         rm build/cloudsave_server$EXT
     else
       CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_server_${platform_split[0]}_${platform_split[1]}$EXT -a ./cmd/server
+    fi
+done
+
+# WEB
+
+platforms=("linux/amd64" "linux/arm64" "linux/riscv64" "linux/ppc64le")
+
+for platform in "${platforms[@]}"; do
+    echo "* Compiling web server for $platform..."
+    platform_split=(${platform//\// })
+
+    EXT=""
+    if [ "${platform_split[0]}" == "windows" ]; then
+      EXT=.exe
+    fi
+
+    if [ "$MAKE_PACKAGE" == "true" ]; then
+        CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_web$EXT -a ./cmd/web
+        tar -czf build/server_${platform_split[0]}_${platform_split[1]}.tar.gz build/cloudsave_web$EXT
+        rm build/cloudsave_web$EXT
+    else
+      CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_web_${platform_split[0]}_${platform_split[1]}$EXT -a ./cmd/web
     fi
 done
 

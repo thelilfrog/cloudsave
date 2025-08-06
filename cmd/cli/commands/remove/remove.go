@@ -17,8 +17,10 @@ type (
 func (*RemoveCmd) Name() string     { return "remove" }
 func (*RemoveCmd) Synopsis() string { return "unregister a game" }
 func (*RemoveCmd) Usage() string {
-	return `remove:
-  Unregister a game
+	return `Usage: cloudsave remove <GAME_ID>
+
+Unregister a game
+Caution: all the backup are deleted
 `
 }
 

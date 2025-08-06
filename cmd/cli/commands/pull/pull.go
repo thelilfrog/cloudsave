@@ -1,10 +1,10 @@
 package pull
 
 import (
+	"cloudsave/cmd/cli/tools/prompt/credentials"
 	"cloudsave/pkg/remote/client"
 	"cloudsave/pkg/repository"
 	"cloudsave/pkg/tools/archive"
-	"cloudsave/cmd/cli/tools/prompt/credentials"
 	"context"
 	"flag"
 	"fmt"
@@ -22,8 +22,9 @@ type (
 func (*PullCmd) Name() string     { return "pull" }
 func (*PullCmd) Synopsis() string { return "pull a game save from the remote" }
 func (*PullCmd) Usage() string {
-	return `list:
-  Pull a game save from the remote
+	return `Usage: cloudsave pull <GAME_ID>
+
+Pull a game save from the remote
 `
 }
 

@@ -1,9 +1,9 @@
 package version
 
 import (
+	"cloudsave/cmd/cli/tools/prompt/credentials"
 	"cloudsave/pkg/constants"
 	"cloudsave/pkg/remote/client"
-	"cloudsave/cmd/cli/tools/prompt/credentials"
 	"context"
 	"flag"
 	"fmt"
@@ -23,8 +23,11 @@ type (
 func (*VersionCmd) Name() string     { return "version" }
 func (*VersionCmd) Synopsis() string { return "show version and system information" }
 func (*VersionCmd) Usage() string {
-	return `add:
-  Show version and system information
+	return `Usage: cloudsave version [-a]
+
+Print the version of the software
+
+Options:
 `
 }
 

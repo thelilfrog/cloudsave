@@ -22,8 +22,11 @@ type (
 func (*ListCmd) Name() string     { return "list" }
 func (*ListCmd) Synopsis() string { return "list all game registered" }
 func (*ListCmd) Usage() string {
-	return `list:
-  List all game registered
+	return `Usage: cloudsave list [-include-backup] [-a]
+
+List all game registered
+
+Options:
 `
 }
 

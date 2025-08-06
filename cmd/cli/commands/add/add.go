@@ -1,32 +1,39 @@
 package add
 
 import (
+	"cloudsave/pkg/remote"
 	"cloudsave/pkg/repository"
 	"context"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/subcommands"
 )
 
 type (
 	AddCmd struct {
-		name string
+		name   string
+		remote string
 	}
 )
 
 func (*AddCmd) Name() string     { return "add" }
-func (*AddCmd) Synopsis() string { return "Add a folder to the sync list" }
+func (*AddCmd) Synopsis() string { return "add a folder to the sync list" }
 func (*AddCmd) Usage() string {
-	return `add:
-  Add a folder to the sync list
+	return `Usage: cloudsave add [-name] [-remote] <PATH>
+
+Add a folder to the track list
+	
+Options:
 `
 }
 
 func (p *AddCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&p.name, "name", "", "Override the name of the game")
+	f.StringVar(&p.remote, "remote", "", "Defines a remote server to sync with")
 }
 
 func (p *AddCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
@@ -48,6 +55,10 @@ func (p *AddCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to add game reference:", err)
 		return subcommands.ExitFailure
+	}
+
+	if len(strings.TrimSpace(p.remote)) > 0 {
+		remote.Set(m.ID, p.remote)
 	}
 
 	fmt.Println(m.ID)

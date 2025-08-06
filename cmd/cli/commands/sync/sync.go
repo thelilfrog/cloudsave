@@ -27,8 +27,9 @@ type (
 func (*SyncCmd) Name() string     { return "sync" }
 func (*SyncCmd) Synopsis() string { return "list all game registered" }
 func (*SyncCmd) Usage() string {
-	return `add:
-  List all game registered
+	return `Usage: cloudsave sync
+
+Synchronize the archives with the server defined for each game.
 `
 }
 
@@ -47,6 +48,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		r, err := remote.One(g.ID)
 		if err != nil {
 			if errors.Is(err, remote.ErrNoRemote) {
+				fmt.Println(g.Name + ": no remote configured")
 				continue
 			}
 			fmt.Fprintln(os.Stderr, "error: failed to load datastore:", err)
@@ -85,6 +87,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 				destroyPg()
 				slog.Warn("failed to push backup files", "err", err)
 			}
+			fmt.Println(g.Name + ": pushed")
 			continue
 		}
 
@@ -136,7 +139,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 					continue
 				}
 			}
-			fmt.Println("already up-to-date")
+			fmt.Println(g.Name + ": already up-to-date")
 			continue
 		}
 
@@ -148,6 +151,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 				return subcommands.ExitFailure
 			}
 			destroyPg()
+			fmt.Println(g.Name + ": pushed")
 			continue
 		}
 
@@ -168,6 +172,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 				fmt.Fprintln(os.Stderr, "error: failed to synchronize date:", err)
 				continue
 			}
+			fmt.Println(g.Name + ": pulled")
 			continue
 		}
 
