@@ -146,11 +146,6 @@ func ArchiveInfo(gameID, documentRoot, uuid string) (repository.Backup, error) {
 		return repository.Backup{}, err
 	}
 
-	v, err := getVersion(gameID, documentRoot)
-	if err != nil {
-		return repository.Backup{}, fmt.Errorf("failed to read game metadata: %w", err)
-	}
-
 	if m, ok := hashCache.Get(cacheID); ok {
 		return repository.Backup{
 			CreatedAt: finfo.ModTime(),
@@ -165,8 +160,7 @@ func ArchiveInfo(gameID, documentRoot, uuid string) (repository.Backup, error) {
 	}
 
 	hashCache.Register(cacheID, cachedInfo{
-		Version: v,
-		MD5:     h,
+		MD5: h,
 	})
 
 	return repository.Backup{
@@ -217,7 +211,7 @@ func Hash(gameID, documentRoot string) (string, error) {
 func getVersion(gameID, documentRoot string) (int, error) {
 	path := filepath.Join(documentRoot, "data", gameID, "metadata.json")
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0740)
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
 		return 0, err
 	}
