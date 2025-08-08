@@ -3,12 +3,9 @@ package api
 import (
 	"cloudsave/cmd/server/data"
 	"cloudsave/pkg/repository"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -343,41 +340,19 @@ func (s HTTPServer) histExists(w http.ResponseWriter, r *http.Request) {
 
 func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id))
 
-	sdir, err := os.Stat(path)
+	sum, err := data.Hash(id, s.documentRoot)
 	if err != nil {
-		notFound("id not found", w, r)
-		return
-	}
-
-	if !sdir.IsDir() {
-		notFound("id not found", w, r)
-		return
-	}
-
-	path = filepath.Join(path, "data.tar.gz")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
-	if err != nil {
-		notFound("id not found", w, r)
-		return
-	}
-	defer f.Close()
-
-	// Create MD5 hasher
-	hasher := md5.New()
-
-	// Copy file content into hasher
-	if _, err := io.Copy(hasher, f); err != nil {
-		fmt.Fprintln(os.Stderr, "error: an error occured while reading data:", err)
+		if errors.Is(err, data.ErrNotExists) {
+			notFound("id not found", w, r)
+			return
+		}
+		fmt.Fprintln(os.Stderr, "error: an error occured while calculating the hash:", err)
 		internalServerError(w, r)
 		return
 	}
 
-	// Get checksum result
-	sum := hasher.Sum(nil)
-	ok(hex.EncodeToString(sum), w, r)
+	ok(sum, w, r)
 }
 
 func (s HTTPServer) metadata(w http.ResponseWriter, r *http.Request) {

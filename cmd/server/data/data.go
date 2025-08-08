@@ -23,6 +23,7 @@ type (
 
 var (
 	ErrBackupNotExists error = errors.New("backup not found")
+	ErrNotExists       error = errors.New("not found")
 
 	// singleton
 	hashCacheMu sync.RWMutex
@@ -175,6 +176,9 @@ func Hash(gameID, documentRoot string) (string, error) {
 
 	sdir, err := os.Stat(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", ErrNotExists
+		}
 		return "", err
 	}
 
