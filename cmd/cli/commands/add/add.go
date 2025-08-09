@@ -1,22 +1,21 @@
 package add
 
 import (
-	"cloudsave/pkg/remote"
-	"cloudsave/pkg/repository"
+	"cloudsave/pkg/data"
 	"context"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/google/subcommands"
 )
 
 type (
 	AddCmd struct {
-		name   string
-		remote string
+		Service *data.Service
+		name    string
+		remote  string
 	}
 )
 
@@ -51,17 +50,16 @@ func (p *AddCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 		p.name = filepath.Base(path)
 	}
 
-	m, err := repository.Add(p.name, path)
+	gameID, err := p.Service.Add(p.name, path, p.remote)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: failed to add game reference:", err)
+		fmt.Fprintln(os.Stderr, "error: failed to add this gamesave to the datastore:", err)
 		return subcommands.ExitFailure
 	}
 
-	if len(strings.TrimSpace(p.remote)) > 0 {
-		remote.Set(m.ID, p.remote)
+	if err := p.Service.Scan(gameID); err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to scan:", err)
+		return subcommands.ExitFailure
 	}
-
-	fmt.Println(m.ID)
 
 	return subcommands.ExitSuccess
 }

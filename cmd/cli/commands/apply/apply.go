@@ -1,13 +1,10 @@
 package apply
 
 import (
-	"cloudsave/pkg/repository"
-	"cloudsave/pkg/tools/archive"
 	"context"
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/google/subcommands"
 )
@@ -35,36 +32,10 @@ func (p *ListCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		return subcommands.ExitUsageError
 	}
 
-	gameID := f.Arg(0)
-	uuid := f.Arg(1)
+	//gameID := f.Arg(0)
+	//uuid := f.Arg(1)
 
-	g, err := repository.One(gameID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to open game metadata: %s\n", err)
-		return subcommands.ExitFailure
-	}
-
-	if err := repository.RestoreArchive(gameID, uuid); err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to restore backup: %s\n", err)
-		return subcommands.ExitFailure
-	}
-
-	if err := os.RemoveAll(g.Path); err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to remove old data: %s\n", err)
-		return subcommands.ExitFailure
-	}
-
-	file, err := os.OpenFile(filepath.Join(repository.DatastorePath(), gameID, "data.tar.gz"), os.O_RDONLY, 0)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to open archive: %s\n", err)
-		return subcommands.ExitFailure
-	}
-	defer file.Close()
-
-	if err := archive.Untar(file, g.Path); err != nil {
-		fmt.Fprintf(os.Stderr, "error: failed to extract archive: %s\n", err)
-		return subcommands.ExitFailure
-	}
+	panic("not implemented")
 
 	return subcommands.ExitSuccess
 }

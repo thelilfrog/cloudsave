@@ -3,6 +3,7 @@ package sync
 import (
 	"cloudsave/cmd/cli/tools/prompt"
 	"cloudsave/cmd/cli/tools/prompt/credentials"
+	"cloudsave/pkg/data"
 	"cloudsave/pkg/remote"
 	"cloudsave/pkg/remote/client"
 	"cloudsave/pkg/repository"
@@ -12,7 +13,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/google/subcommands"
@@ -21,6 +21,7 @@ import (
 
 type (
 	SyncCmd struct {
+		Service *data.Service
 	}
 )
 
@@ -37,7 +38,7 @@ func (p *SyncCmd) SetFlags(f *flag.FlagSet) {
 }
 
 func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
-	games, err := repository.All()
+	games, err := p.Service.AllGames()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load datastore:", err)
 		return subcommands.ExitFailure
@@ -92,24 +93,11 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		}
 
 		pg.Describe(fmt.Sprintf("[%s] Fetching metadata...", g.Name))
-		hlocal, err := repository.Hash(r.GameID)
-		if err != nil {
-			destroyPg()
-			slog.Error(err.Error())
-			continue
-		}
 
 		hremote, err := cli.Hash(r.GameID)
 		if err != nil {
 			destroyPg()
 			fmt.Fprintln(os.Stderr, "error: failed to get the file hash from the remote:", err)
-			continue
-		}
-
-		vlocal, err := repository.Version(r.GameID)
-		if err != nil {
-			destroyPg()
-			slog.Error(err.Error())
 			continue
 		}
 
@@ -130,11 +118,11 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			slog.Warn("failed to push backup files", "err", err)
 		}
 
-		if hlocal == hremote {
+		if g.MD5 == hremote {
 			destroyPg()
-			if vlocal != remoteMetadata.Version {
+			if g.Version != remoteMetadata.Version {
 				slog.Debug("version is not the same, but the hash is equal. Updating local database")
-				if err := repository.SetVersion(r.GameID, remoteMetadata.Version); err != nil {
+				if err := p.Service.SetVersion(r.GameID, remoteMetadata.Version); err != nil {
 					fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
 					continue
 				}
@@ -143,7 +131,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
-		if vlocal > remoteMetadata.Version {
+		if g.Version > remoteMetadata.Version {
 			pg.Describe(fmt.Sprintf("[%s] Pushing data...", g.Name))
 			if err := push(g, cli); err != nil {
 				destroyPg()
@@ -155,22 +143,21 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			continue
 		}
 
-		if vlocal < remoteMetadata.Version {
+		if g.Version < remoteMetadata.Version {
 			destroyPg()
 			if err := pull(r.GameID, cli); err != nil {
 				destroyPg()
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
 			}
-			if err := repository.SetVersion(r.GameID, remoteMetadata.Version); err != nil {
+
+			g.Version = remoteMetadata.Version
+			g.Date = remoteMetadata.Date
+
+			if err := p.Service.UpdateMetadata(g.ID, g); err != nil {
 				destroyPg()
-				fmt.Fprintln(os.Stderr, "error: failed to synchronize version number:", err)
-				continue
-			}
-			if err := repository.SetDate(r.GameID, remoteMetadata.Date); err != nil {
-				destroyPg()
-				fmt.Fprintln(os.Stderr, "error: failed to synchronize date:", err)
-				continue
+				fmt.Fprintln(os.Stderr, "failed to push:", err)
+				return subcommands.ExitFailure
 			}
 			fmt.Println(g.Name + ": pulled")
 			continue
@@ -178,8 +165,8 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 
 		destroyPg()
 
-		if vlocal == remoteMetadata.Version {
-			if err := conflict(r.GameID, g, remoteMetadata, cli); err != nil {
+		if g.Version == remoteMetadata.Version {
+			if err := p.conflict(r.GameID, g, remoteMetadata, cli); err != nil {
 				fmt.Fprintln(os.Stderr, "error: failed to resolve conflict:", err)
 				continue
 			}
@@ -191,8 +178,8 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 	return subcommands.ExitSuccess
 }
 
-func conflict(gameID string, m, remoteMetadata repository.Metadata, cli *client.Client) error {
-	g, err := repository.One(gameID)
+func (p *SyncCmd) conflict(gameID string, m, remoteMetadata repository.Metadata, cli *client.Client) error {
+	g, err := p.Service.One(gameID)
 	if err != nil {
 		slog.Warn("a conflict was found but the game is not found in the database")
 		slog.Debug("debug info", "gameID", gameID)
@@ -211,35 +198,33 @@ func conflict(gameID string, m, remoteMetadata repository.Metadata, cli *client.
 	switch res {
 	case prompt.My:
 		{
-			if err := push(m, cli); err != nil {
+			if err := p.push(m, cli); err != nil {
 				return fmt.Errorf("failed to push: %w", err)
 			}
 		}
 
 	case prompt.Their:
 		{
-			if err := pull(gameID, cli); err != nil {
+			if err := p.pull(gameID, cli); err != nil {
 				return fmt.Errorf("failed to push: %w", err)
 			}
-			if err := repository.SetVersion(gameID, remoteMetadata.Version); err != nil {
-				return fmt.Errorf("failed to synchronize version number: %w", err)
-			}
-			if err := repository.SetDate(gameID, remoteMetadata.Date); err != nil {
-				return fmt.Errorf("failed to synchronize date: %w", err)
+			g.Version = remoteMetadata.Version
+			g.Date = remoteMetadata.Date
+
+			if err := p.Service.UpdateMetadata(g.ID, g); err != nil {
+				return fmt.Errorf("failed to push: %w", err)
 			}
 		}
 	}
 	return nil
 }
 
-func push(m repository.Metadata, cli *client.Client) error {
-	archivePath := filepath.Join(repository.DatastorePath(), m.ID, "data.tar.gz")
-
-	return cli.PushSave(archivePath, m)
+func (p *SyncCmd) push(m repository.Metadata, cli *client.Client) error {
+	
 }
 
-func pushBackup(m repository.Metadata, cli *client.Client) error {
-	bs, err := repository.Archives(m.ID)
+func (p *SyncCmd) pushBackup(m repository.Metadata, cli *client.Client) error {
+	bs, err := p.Service.AllBackups(m.ID)
 	if err != nil {
 		return err
 	}
@@ -262,7 +247,7 @@ func pushBackup(m repository.Metadata, cli *client.Client) error {
 	return nil
 }
 
-func pullBackup(m repository.Metadata, cli *client.Client) error {
+func (p *SyncCmd) pullBackup(m repository.Metadata, cli *client.Client) error {
 	bs, err := cli.ListArchives(m.ID)
 	if err != nil {
 		return err
@@ -274,20 +259,13 @@ func pullBackup(m repository.Metadata, cli *client.Client) error {
 			return err
 		}
 
-		linfo, err := repository.Archive(m.ID, uuid)
+		linfo, err := p.Service.Backup(m.ID, uuid)
 		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		}
-
-		path := filepath.Join(repository.DatastorePath(), m.ID, "hist", uuid)
-		if err := os.MkdirAll(path, 0740); err != nil {
 			return err
 		}
 
-		if rinfo.MD5 != linfo.MD5 {
-			if err := cli.PullBackup(m.ID, uuid, filepath.Join(path, "data.tar.gz")); err != nil {
+		if linfo != rinfo {
+			if err := p.Service.PullBackup(m.ID, uuid, cli); err != nil {
 				return err
 			}
 		}
@@ -295,10 +273,8 @@ func pullBackup(m repository.Metadata, cli *client.Client) error {
 	return nil
 }
 
-func pull(gameID string, cli *client.Client) error {
-	archivePath := filepath.Join(repository.DatastorePath(), gameID, "data.tar.gz")
-
-	return cli.Pull(gameID, archivePath)
+func (p *SyncCmd) pull(gameID string, cli *client.Client) error {
+	return p.Service.PullArchive(gameID, "", cli)
 }
 
 func connect(remoteCred map[string]map[string]string, r remote.Remote) (*client.Client, error) {

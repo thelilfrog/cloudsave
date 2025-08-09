@@ -2,20 +2,19 @@ package pull
 
 import (
 	"cloudsave/cmd/cli/tools/prompt/credentials"
+	"cloudsave/pkg/data"
 	"cloudsave/pkg/remote/client"
-	"cloudsave/pkg/repository"
-	"cloudsave/pkg/tools/archive"
 	"context"
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/google/subcommands"
 )
 
 type (
 	PullCmd struct {
+		Service *data.Service
 	}
 )
 
@@ -44,45 +43,33 @@ func (p *PullCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 
 	username, password, err := credentials.Read()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to read std output: %s", err)
+		fmt.Fprintf(os.Stderr, "error: failed to read std output: %s", err)
 		return subcommands.ExitFailure
 	}
 
 	cli := client.New(url, username, password)
 
 	if err := cli.Ping(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to connect to the remote: %s", err)
+		fmt.Fprintf(os.Stderr, "error: failed to connect to the remote: %s", err)
 		return subcommands.ExitFailure
 	}
 
-	archivePath := filepath.Join(repository.DatastorePath(), gameID, "data.tar.gz")
+	if err := p.Service.PullCurrent(gameID, path, cli); err != nil {
+		fmt.Fprintf(os.Stderr, "error: failed to pull current archive: %s", err)
+		return subcommands.ExitFailure
+	}
 
-	m, err := cli.Metadata(gameID)
+	ids, err := cli.ListArchives(gameID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to get metadata: %s", err)
+		fmt.Fprintf(os.Stderr, "error: failed to list backup archive: %s", err)
 		return subcommands.ExitFailure
 	}
 
-	err = repository.Register(m, path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to register local metadata: %s", err)
-		return subcommands.ExitFailure
-	}
-
-	if err := cli.Pull(gameID, archivePath); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to pull from the remote: %s", err)
-		return subcommands.ExitFailure
-	}
-
-	fi, err := os.OpenFile(archivePath, os.O_RDONLY, 0)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to open archive: %s", err)
-		return subcommands.ExitFailure
-	}
-
-	if err := archive.Untar(fi, path); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to unarchive file: %s", err)
-		return subcommands.ExitFailure
+	for _, id := range ids {
+		if err := p.Service.PullBackup(gameID, id, cli); err != nil {
+			fmt.Fprintf(os.Stderr, "error: failed to pull backup archive %s: %s", id, err)
+			return subcommands.ExitFailure
+		}
 	}
 
 	return subcommands.ExitSuccess
