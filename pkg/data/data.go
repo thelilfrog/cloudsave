@@ -61,11 +61,19 @@ func (s *Service) One(gameID string) (repository.Metadata, error) {
 func (s *Service) Backup(gameID, backupID string) (repository.Backup, error) {
 	id := repository.NewBackupIdentifier(gameID, backupID)
 
+	if err := s.repo.Mkdir(id); err != nil {
+		return repository.Backup{}, fmt.Errorf("failed to make game dir: %w", err)
+	}
+
 	return s.repo.Backup(id)
 }
 
 func (s *Service) UpdateMetadata(gameID string, m repository.Metadata) error {
 	id := repository.NewGameIdentifier(gameID)
+
+	if err := s.repo.Mkdir(id); err != nil {
+		return fmt.Errorf("failed to make game dir: %w", err)
+	}
 
 	if err := s.repo.WriteMetadata(id, m); err != nil {
 		return fmt.Errorf("failed to write metadate: %w", err)
@@ -117,6 +125,38 @@ func (s *Service) Scan(gameID string) error {
 	return nil
 }
 
+func (s *Service) MakeBackup(gameID string) error {
+	var id repository.Identifier = repository.NewGameIdentifier(gameID)
+
+	src, err := s.repo.ReadBlob(id)
+	if err != nil {
+		return err
+	}
+	if v, ok := src.(io.Closer); ok {
+		defer v.Close()
+	}
+
+	id = repository.NewBackupIdentifier(gameID, uuid.NewString())
+
+	if err := s.repo.Mkdir(id); err != nil {
+		return err
+	}
+
+	dst, err := s.repo.WriteBlob(id)
+	if err != nil {
+		return err
+	}
+	if v, ok := dst.(io.Closer); ok {
+		defer v.Close()
+	}
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (s *Service) AllGames() ([]repository.Metadata, error) {
 	ids, err := s.repo.All()
 	if err != nil {
@@ -161,6 +201,21 @@ func (l Service) PullArchive(gameID, backupID string, cli *client.Client) error 
 
 	path := l.repo.DataPath(repository.NewGameIdentifier(gameID))
 	return cli.Pull(gameID, filepath.Join(path, "data.tar.gz"))
+}
+
+func (l Service) PushArchive(gameID, backupID string, cli *client.Client) error {
+	m, err := l.repo.Metadata(repository.NewGameIdentifier(gameID))
+	if err != nil {
+		return err
+	}
+
+	if len(backupID) > 0 {
+		path := l.repo.DataPath(repository.NewBackupIdentifier(gameID, backupID))
+		return cli.PushSave(filepath.Join(path, "data.taz.gz"), m)
+	}
+
+	path := l.repo.DataPath(repository.NewGameIdentifier(gameID))
+	return cli.PushSave(filepath.Join(path, "data.tar.gz"), m)
 }
 
 func (l Service) PullCurrent(id, path string, cli *client.Client) error {
@@ -250,4 +305,42 @@ func IsDirectoryChanged(path string, lastRun time.Time) bool {
 		return nil
 	})
 	return changed
+}
+
+func (l Service) Copy(id string, src io.Reader) error {
+	dst, err := l.repo.WriteBlob(repository.NewGameIdentifier(id))
+	if err != nil {
+		return err
+	}
+	if v, ok := dst.(io.Closer); ok {
+		defer v.Close()
+	}
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (l Service) CopyBackup(gameID, backupID string, src io.Reader) error {
+	id := repository.NewBackupIdentifier(gameID, backupID)
+
+	if err := l.repo.Mkdir(id); err != nil {
+		return err
+	}
+
+	dst, err := l.repo.WriteBlob(id)
+	if err != nil {
+		return err
+	}
+	if v, ok := dst.(io.Closer); ok {
+		defer v.Close()
+	}
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -78,13 +78,13 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 
 		if !exists {
 			pg.Describe(fmt.Sprintf("[%s] Pushing data...", g.Name))
-			if err := push(g, cli); err != nil {
+			if err := p.push(g, cli); err != nil {
 				destroyPg()
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
 			}
 			pg.Describe(fmt.Sprintf("[%s] Pushing backup...", g.Name))
-			if err := pushBackup(g, cli); err != nil {
+			if err := p.pushBackup(g, cli); err != nil {
 				destroyPg()
 				slog.Warn("failed to push backup files", "err", err)
 			}
@@ -109,12 +109,12 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 		}
 
 		pg.Describe(fmt.Sprintf("[%s] Pulling backup...", g.Name))
-		if err := pullBackup(g, cli); err != nil {
+		if err := p.pullBackup(g, cli); err != nil {
 			slog.Warn("failed to pull backup files", "err", err)
 		}
 
 		pg.Describe(fmt.Sprintf("[%s] Pushing backup...", g.Name))
-		if err := pushBackup(g, cli); err != nil {
+		if err := p.pushBackup(g, cli); err != nil {
 			slog.Warn("failed to push backup files", "err", err)
 		}
 
@@ -133,7 +133,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 
 		if g.Version > remoteMetadata.Version {
 			pg.Describe(fmt.Sprintf("[%s] Pushing data...", g.Name))
-			if err := push(g, cli); err != nil {
+			if err := p.push(g, cli); err != nil {
 				destroyPg()
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
@@ -145,7 +145,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 
 		if g.Version < remoteMetadata.Version {
 			destroyPg()
-			if err := pull(r.GameID, cli); err != nil {
+			if err := p.pull(r.GameID, cli); err != nil {
 				destroyPg()
 				fmt.Fprintln(os.Stderr, "failed to push:", err)
 				return subcommands.ExitFailure
@@ -220,7 +220,7 @@ func (p *SyncCmd) conflict(gameID string, m, remoteMetadata repository.Metadata,
 }
 
 func (p *SyncCmd) push(m repository.Metadata, cli *client.Client) error {
-	
+	return p.Service.PushArchive(m.ID, "", cli)
 }
 
 func (p *SyncCmd) pushBackup(m repository.Metadata, cli *client.Client) error {

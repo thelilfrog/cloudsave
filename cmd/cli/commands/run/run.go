@@ -37,6 +37,10 @@ func (p *RunCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 	}
 
 	for _, metadata := range datastore {
+		if err := p.Service.MakeBackup(metadata.ID); err != nil {
+			fmt.Fprintln(os.Stderr, "error: failed to make backup:", err)
+			return subcommands.ExitFailure
+		}
 		if err := p.Service.Scan(metadata.ID); err != nil {
 			fmt.Fprintln(os.Stderr, "error: failed to scan:", err)
 			return subcommands.ExitFailure
