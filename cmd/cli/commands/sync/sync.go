@@ -264,7 +264,7 @@ func (p *SyncCmd) pullBackup(m repository.Metadata, cli *client.Client) error {
 			return err
 		}
 
-		if linfo != rinfo {
+		if linfo.MD5 != rinfo.MD5 {
 			if err := p.Service.PullBackup(m.ID, uuid, cli); err != nil {
 				return err
 			}
