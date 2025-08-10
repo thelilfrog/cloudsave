@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"runtime"
 	"slices"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -160,37 +161,58 @@ func (s *HTTPServer) detailled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	save, err := cli.Metadata(id)
-	if err != nil {
-		if errors.Is(err, client.ErrUnauthorized) {
+	var wg sync.WaitGroup
+	var err1, err2, err3 error
+	var save repository.Metadata
+	var h string
+	var ids []string
+
+	wg.Add(1)
+	go func() {
+		save, err1 = cli.Metadata(id)
+		wg.Done()
+	}()
+
+	wg.Add(1)
+	go func() {
+		h, err2 = cli.Hash(id)
+		wg.Done()
+	}()
+
+	wg.Add(1)
+	go func() {
+		ids, err3 = cli.ListArchives(id)
+		wg.Done()
+	}()
+
+	wg.Wait()
+
+	if err1 != nil || err2 != nil || err3 != nil {
+		if errors.Is(err1, client.ErrUnauthorized) {
 			unauthorized("Unable to access resources", w, r)
 			return
 		}
-		slog.Error("unable to connect to the remote", "err", err)
+		slog.Error("unable to connect to the remote", "err", err1)
 		return
 	}
 
-	h, err := cli.Hash(id)
-	if err != nil {
-		slog.Error("unable to connect to the remote", "err", err)
-		return
-	}
-
-	ids, err := cli.ListArchives(id)
-	if err != nil {
-		slog.Error("unable to connect to the remote", "err", err)
-		return
-	}
+	wg = sync.WaitGroup{}
 
 	var bm []repository.Backup
 	for _, i := range ids {
-		b, err := cli.ArchiveInfo(id, i)
-		if err != nil {
-			slog.Error("unable to connect to the remote", "err", err)
-			return
-		}
-		bm = append(bm, b)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			b, err := cli.ArchiveInfo(id, i)
+			if err != nil {
+				slog.Error("unable to connect to the remote", "err", err)
+				return
+			}
+			bm = append(bm, b)
+		}()
 	}
+
+	wg.Wait()
 
 	payload := DetaillePayload{
 		Save:           save,

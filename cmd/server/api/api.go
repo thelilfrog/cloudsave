@@ -215,20 +215,9 @@ func (s HTTPServer) upload(w http.ResponseWriter, r *http.Request) {
 
 func (s HTTPServer) allHist(w http.ResponseWriter, r *http.Request) {
 	gameID := chi.URLParam(r, "id")
-	path := filepath.Join(s.documentRoot, "data", gameID, "hist")
 	datastore := make([]string, 0)
 
-	if _, err := os.Stat(path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			ok(datastore, w, r)
-			return
-		}
-		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
-		internalServerError(w, r)
-		return
-	}
-
-	ds, err := os.ReadDir(path)
+	ds, err := s.Service.AllBackups(gameID)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
 		internalServerError(w, r)
@@ -236,7 +225,7 @@ func (s HTTPServer) allHist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, d := range ds {
-		datastore = append(datastore, d.Name())
+		datastore = append(datastore, d.UUID)
 	}
 
 	ok(datastore, w, r)
