@@ -1,7 +1,7 @@
 package remove
 
 import (
-	"cloudsave/pkg/repository"
+	"cloudsave/pkg/data"
 	"context"
 	"flag"
 	"fmt"
@@ -11,7 +11,9 @@ import (
 )
 
 type (
-	RemoveCmd struct{}
+	RemoveCmd struct {
+		Service *data.Service
+	}
 )
 
 func (*RemoveCmd) Name() string     { return "remove" }
@@ -33,7 +35,7 @@ func (p *RemoveCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}
 		return subcommands.ExitUsageError
 	}
 
-	err := repository.Remove(f.Arg(0))
+	err := p.Service.RemoveGame(f.Arg(0))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to unregister the game:", err)
 		return subcommands.ExitFailure

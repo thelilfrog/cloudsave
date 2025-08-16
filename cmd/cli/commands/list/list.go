@@ -2,8 +2,8 @@ package list
 
 import (
 	"cloudsave/cmd/cli/tools/prompt/credentials"
+	"cloudsave/pkg/data"
 	"cloudsave/pkg/remote/client"
-	"cloudsave/pkg/repository"
 	"context"
 	"flag"
 	"fmt"
@@ -14,8 +14,9 @@ import (
 
 type (
 	ListCmd struct {
-		remote bool
-		backup bool
+		Service *data.Service
+		remote  bool
+		backup  bool
 	}
 )
 
@@ -44,25 +45,25 @@ func (p *ListCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 
 		username, password, err := credentials.Read()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to read std output: %s", err)
+			fmt.Fprintf(os.Stderr, "error: failed to read std output: %s", err)
 			return subcommands.ExitFailure
 		}
 
-		if err := remote(f.Arg(0), username, password, p.backup); err != nil {
+		if err := p.server(f.Arg(0), username, password, p.backup); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			return subcommands.ExitFailure
 		}
 		return subcommands.ExitSuccess
 	}
-	if err := local(p.backup); err != nil {
+	if err := p.local(p.backup); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return subcommands.ExitFailure
 	}
 	return subcommands.ExitSuccess
 }
 
-func local(includeBackup bool) error {
-	games, err := repository.All()
+func (p *ListCmd) local(includeBackup bool) error {
+	games, err := p.Service.AllGames()
 	if err != nil {
 		return fmt.Errorf("failed to load datastore: %w", err)
 	}
@@ -72,7 +73,7 @@ func local(includeBackup bool) error {
 		fmt.Println("Name:", g.Name)
 		fmt.Println("Last Version:", g.Date, "( Version Number", g.Version, ")")
 		if includeBackup {
-			bk, err := repository.Archives(g.ID)
+			bk, err := p.Service.AllBackups(g.ID)
 			if err != nil {
 				return fmt.Errorf("failed to list backup files: %w", err)
 			}
@@ -89,7 +90,7 @@ func local(includeBackup bool) error {
 	return nil
 }
 
-func remote(url, username, password string, includeBackup bool) error {
+func (p *ListCmd) server(url, username, password string, includeBackup bool) error {
 	cli := client.New(url, username, password)
 
 	if err := cli.Ping(); err != nil {

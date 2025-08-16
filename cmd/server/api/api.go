@@ -1,7 +1,7 @@
 package api
 
 import (
-	"cloudsave/cmd/server/data"
+	"cloudsave/pkg/data"
 	"cloudsave/pkg/repository"
 	"encoding/json"
 	"errors"
@@ -20,16 +20,18 @@ import (
 type (
 	HTTPServer struct {
 		Server       *http.Server
+		Service      *data.Service
 		documentRoot string
 	}
 )
 
 // NewServer start the http server
-func NewServer(documentRoot string, creds map[string]string, port int) *HTTPServer {
+func NewServer(documentRoot string, srv *data.Service, creds map[string]string, port int) *HTTPServer {
 	if !filepath.IsAbs(documentRoot) {
 		panic("the document root is not an absolute path")
 	}
 	s := &HTTPServer{
+		Service:      srv,
 		documentRoot: documentRoot,
 	}
 	router := chi.NewRouter()
@@ -195,14 +197,14 @@ func (s HTTPServer) upload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	//TODO make a transaction
-	if err := data.UpdateMetadata(id, s.documentRoot, m); err != nil {
+	if err := s.Service.UpdateMetadata(id, m); err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to write metadata to disk:", err)
 		internalServerError(w, r)
 		return
 	}
 
-	if err := data.Write(id, s.documentRoot, file); err != nil {
-		fmt.Fprintln(os.Stderr, "error: failed to write file to disk:", err)
+	if err := s.Service.Copy(id, file); err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to write data to disk:", err)
 		internalServerError(w, r)
 		return
 	}
@@ -213,20 +215,9 @@ func (s HTTPServer) upload(w http.ResponseWriter, r *http.Request) {
 
 func (s HTTPServer) allHist(w http.ResponseWriter, r *http.Request) {
 	gameID := chi.URLParam(r, "id")
-	path := filepath.Join(s.documentRoot, "data", gameID, "hist")
 	datastore := make([]string, 0)
 
-	if _, err := os.Stat(path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			ok(datastore, w, r)
-			return
-		}
-		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
-		internalServerError(w, r)
-		return
-	}
-
-	ds, err := os.ReadDir(path)
+	ds, err := s.Service.AllBackups(gameID)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
 		internalServerError(w, r)
@@ -234,7 +225,7 @@ func (s HTTPServer) allHist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, d := range ds {
-		datastore = append(datastore, d.Name())
+		datastore = append(datastore, d.UUID)
 	}
 
 	ok(datastore, w, r)
@@ -268,8 +259,8 @@ func (s HTTPServer) histUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	if err := data.WriteHist(gameID, s.documentRoot, uuid, file); err != nil {
-		fmt.Fprintln(os.Stderr, "error: failed to write file to disk:", err)
+	if err := s.Service.CopyBackup(gameID, uuid, file); err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to write data to disk:", err)
 		internalServerError(w, r)
 		return
 	}
@@ -324,10 +315,10 @@ func (s HTTPServer) histExists(w http.ResponseWriter, r *http.Request) {
 	gameID := chi.URLParam(r, "id")
 	uuid := chi.URLParam(r, "uuid")
 
-	finfo, err := data.ArchiveInfo(gameID, s.documentRoot, uuid)
+	finfo, err := s.Service.Backup(gameID, uuid)
 	if err != nil {
-		if errors.Is(err, data.ErrBackupNotExists) {
-			notFound("backup not found", w, r)
+		if errors.Is(err, repository.ErrNotFound) {
+			notFound("not found", w, r)
 			return
 		}
 		fmt.Fprintln(os.Stderr, "error: failed to read data:", err)
@@ -341,10 +332,10 @@ func (s HTTPServer) histExists(w http.ResponseWriter, r *http.Request) {
 func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	sum, err := data.Hash(id, s.documentRoot)
+	m, err := s.Service.One(id)
 	if err != nil {
-		if errors.Is(err, data.ErrNotExists) {
-			notFound("id not found", w, r)
+		if errors.Is(err, repository.ErrNotFound) {
+			notFound("not found", w, r)
 			return
 		}
 		fmt.Fprintln(os.Stderr, "error: an error occured while calculating the hash:", err)
@@ -352,7 +343,7 @@ func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok(sum, w, r)
+	ok(m.MD5, w, r)
 }
 
 func (s HTTPServer) metadata(w http.ResponseWriter, r *http.Request) {

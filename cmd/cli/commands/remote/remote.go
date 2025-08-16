@@ -1,9 +1,9 @@
 package remote
 
 import (
+	"cloudsave/pkg/data"
 	"cloudsave/pkg/remote"
 	"cloudsave/pkg/remote/client"
-	"cloudsave/pkg/repository"
 	"context"
 	"flag"
 	"fmt"
@@ -14,8 +14,9 @@ import (
 
 type (
 	RemoteCmd struct {
-		set  bool
-		list bool
+		Service *data.Service
+		set     bool
+		list    bool
 	}
 )
 
@@ -43,7 +44,7 @@ func (p *RemoteCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interface
 	switch {
 	case p.list:
 		{
-			if err := list(); err != nil {
+			if err := p.print(); err != nil {
 				fmt.Fprintln(os.Stderr, "error:", err)
 				return subcommands.ExitFailure
 			}
@@ -68,8 +69,8 @@ func (p *RemoteCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interface
 	return subcommands.ExitSuccess
 }
 
-func list() error {
-	games, err := repository.All()
+func (p *RemoteCmd) print() error {
+	games, err := p.Service.AllGames()
 	if err != nil {
 		return fmt.Errorf("failed to load datastore: %w", err)
 	}

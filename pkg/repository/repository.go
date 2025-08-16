@@ -2,7 +2,6 @@ package repository
 
 import (
 	"cloudsave/pkg/tools/hash"
-	"cloudsave/pkg/tools/id"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type (
@@ -21,6 +18,12 @@ type (
 		Path    string    `json:"path"`
 		Version int       `json:"version"`
 		Date    time.Time `json:"date"`
+		MD5     string    `json:"-"`
+	}
+
+	Remote struct {
+		URL    string `json:"url"`
+		GameID string `json:"-"`
 	}
 
 	Backup struct {
@@ -29,354 +32,453 @@ type (
 		UUID        string    `json:"uuid"`
 		ArchivePath string    `json:"-"`
 	}
+
+	Data struct {
+		Metadata Metadata
+		Remote   *Remote
+		DataPath string
+		Backup   map[string]Backup
+	}
+
+	GameIdentifier struct {
+		gameID string
+	}
+
+	BackupIdentifier struct {
+		gameID   string
+		backupID string
+	}
+
+	Identifier interface {
+		Key() string
+	}
+
+	LazyRepository struct {
+		dataRoot string
+	}
+
+	EagerRepository struct {
+		Repository
+
+		data map[string]Data
+	}
+
+	Repository interface {
+		Mkdir(id Identifier) error
+
+		All() ([]string, error)
+		AllHist(gameID GameIdentifier) ([]string, error)
+
+		WriteBlob(ID Identifier) (io.Writer, error)
+		WriteMetadata(gameID GameIdentifier, m Metadata) error
+
+		Metadata(gameID GameIdentifier) (Metadata, error)
+		LastScan(gameID GameIdentifier) (time.Time, error)
+		ReadBlob(gameID Identifier) (io.Reader, error)
+		Backup(id BackupIdentifier) (Backup, error)
+		Remote(id GameIdentifier) (*Remote, error)
+
+		SetRemote(gameID GameIdentifier, url string) error
+		ResetLastScan(id GameIdentifier) error
+
+		DataPath(id Identifier) string
+
+		Remove(gameID GameIdentifier) error
+	}
 )
 
 var (
-	roaming       string
-	datastorepath string
+	ErrNotFound error = errors.New("not found")
 )
 
-func init() {
-	var err error
-	roaming, err = os.UserConfigDir()
-	if err != nil {
-		panic("failed to get user config path: " + err.Error())
+func NewGameIdentifier(gameID string) GameIdentifier {
+	return GameIdentifier{
+		gameID: gameID,
 	}
+}
+func (bi GameIdentifier) Key() string {
+	return bi.gameID
+}
 
-	datastorepath = filepath.Join(roaming, "cloudsave", "data")
-	err = os.MkdirAll(datastorepath, 0740)
-	if err != nil {
-		panic("cannot make the datastore:" + err.Error())
+func NewBackupIdentifier(gameID, backupID string) BackupIdentifier {
+	return BackupIdentifier{
+		gameID:   gameID,
+		backupID: backupID,
 	}
 }
 
-func Add(name, path string) (Metadata, error) {
-	m := Metadata{
-		ID:   id.New(),
-		Name: name,
-		Path: path,
-	}
-
-	err := os.MkdirAll(filepath.Join(datastorepath, m.ID), 0740)
-	if err != nil {
-		panic("cannot make directory for the game:" + err.Error())
-	}
-
-	f, err := os.OpenFile(filepath.Join(datastorepath, m.ID, "metadata.json"), os.O_CREATE|os.O_WRONLY, 0740)
-	if err != nil {
-		return Metadata{}, fmt.Errorf("cannot open the metadata file in the datastore: %w", err)
-	}
-	defer f.Close()
-
-	e := json.NewEncoder(f)
-	err = e.Encode(m)
-	if err != nil {
-		return Metadata{}, fmt.Errorf("cannot write into the metadata file in the datastore: %w", err)
-	}
-
-	return m, nil
+func (bi BackupIdentifier) Key() string {
+	return bi.gameID + ":" + bi.backupID
 }
 
-func Register(m Metadata, path string) error {
-	m.Path = path
-
-	err := os.MkdirAll(filepath.Join(datastorepath, m.ID), 0740)
-	if err != nil {
-		panic("cannot make directory for the game:" + err.Error())
+func NewLazyRepository(dataRootPath string) (*LazyRepository, error) {
+	if m, err := os.Stat(dataRootPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if err := os.MkdirAll(dataRootPath, 0740); err != nil {
+				return nil, fmt.Errorf("failed to make the directory: %w", err)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to open datastore: %w", err)
+		}
+	} else {
+		if !m.IsDir() {
+			return nil, fmt.Errorf("failed to open datastore: not a directory")
+		}
 	}
 
-	f, err := os.OpenFile(filepath.Join(datastorepath, m.ID, "metadata.json"), os.O_CREATE|os.O_WRONLY, 0740)
-	if err != nil {
-		return fmt.Errorf("cannot open the metadata file in the datastore: %w", err)
-	}
-	defer f.Close()
+	return &LazyRepository{
+		dataRoot: dataRootPath,
+	}, nil
+}
 
-	e := json.NewEncoder(f)
-	err = e.Encode(m)
+func (l *LazyRepository) Mkdir(id Identifier) error {
+	return os.MkdirAll(l.DataPath(id), 0740)
+}
+
+func (l *LazyRepository) All() ([]string, error) {
+	dir, err := os.ReadDir(l.dataRoot)
 	if err != nil {
-		return fmt.Errorf("cannot write into the metadata file in the datastore: %w", err)
+		return nil, fmt.Errorf("failed to open directory: %w", err)
+	}
+
+	var res []string
+	for _, d := range dir {
+		res = append(res, d.Name())
+	}
+
+	return res, nil
+}
+
+func (l *LazyRepository) AllHist(id GameIdentifier) ([]string, error) {
+	path := l.DataPath(id)
+
+	dir, err := os.ReadDir(filepath.Join(path, "hist"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to open directory: %w", err)
+	}
+
+	var res []string
+	for _, d := range dir {
+		res = append(res, d.Name())
+	}
+
+	return res, nil
+}
+
+func (l *LazyRepository) WriteBlob(ID Identifier) (io.Writer, error) {
+	path := l.DataPath(ID)
+
+	dst, err := os.OpenFile(filepath.Join(path, "data.tar.gz"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open destination file: %w", err)
+	}
+
+	return dst, nil
+}
+
+func (l *LazyRepository) WriteMetadata(id GameIdentifier, m Metadata) error {
+	path := l.DataPath(id)
+
+	dst, err := os.OpenFile(filepath.Join(path, "metadata.json"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
+	if err != nil {
+		return fmt.Errorf("failed to open destination file: %w", err)
+	}
+	defer dst.Close()
+
+	e := json.NewEncoder(dst)
+	if err := e.Encode(m); err != nil {
+		return fmt.Errorf("failed to encode data: %w", err)
 	}
 
 	return nil
 }
 
-func All() ([]Metadata, error) {
-	ds, err := os.ReadDir(datastorepath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot open the datastore: %w", err)
-	}
+func (l *LazyRepository) Metadata(id GameIdentifier) (Metadata, error) {
+	path := l.DataPath(id)
 
-	var datastore []Metadata
-	for _, d := range ds {
-		content, err := os.ReadFile(filepath.Join(datastorepath, d.Name(), "metadata.json"))
-		if err != nil {
-			continue
+	src, err := os.OpenFile(filepath.Join(path, "metadata.json"), os.O_RDONLY, 0)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Metadata{}, ErrNotFound
 		}
-
-		var m Metadata
-		err = json.Unmarshal(content, &m)
-		if err != nil {
-			return nil, fmt.Errorf("corrupted datastore: failed to parse %s/metadata.json: %w", d.Name(), err)
-		}
-
-		datastore = append(datastore, m)
-	}
-	return datastore, nil
-}
-
-func One(gameID string) (Metadata, error) {
-	_, err := os.ReadDir(datastorepath)
-	if err != nil {
-		return Metadata{}, fmt.Errorf("cannot open the datastore: %w", err)
-	}
-
-	content, err := os.ReadFile(filepath.Join(datastorepath, gameID, "metadata.json"))
-	if err != nil {
-		return Metadata{}, fmt.Errorf("game not found: %w", err)
+		return Metadata{}, fmt.Errorf("corrupted datastore: failed to open metadata: %w", err)
 	}
 
 	var m Metadata
-	err = json.Unmarshal(content, &m)
+	d := json.NewDecoder(src)
+	if err := d.Decode(&m); err != nil {
+		return Metadata{}, fmt.Errorf("corrupted datastore: failed to parse metadata: %w", err)
+	}
+
+	m.MD5, err = hash.FileMD5(filepath.Join(path, "data.tar.gz"))
 	if err != nil {
-		return Metadata{}, fmt.Errorf("corrupted datastore: failed to parse %s/metadata.json: %w", gameID, err)
+		return Metadata{}, fmt.Errorf("failed to calculate md5: %w", err)
 	}
 
 	return m, nil
 }
 
-func MakeArchive(gameID string) error {
-	path := filepath.Join(datastorepath, gameID, "data.tar.gz")
+func (l *LazyRepository) Backup(id BackupIdentifier) (Backup, error) {
+	path := l.DataPath(id)
 
-	// open old
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	fs, err := os.Stat(filepath.Join(path, "data.tar.gz"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil
+			return Backup{}, ErrNotFound
 		}
-		return fmt.Errorf("failed to open old file: %w", err)
-	}
-	defer f.Close()
-
-	histDirPath := filepath.Join(datastorepath, gameID, "hist", uuid.NewString())
-	if err := os.MkdirAll(histDirPath, 0740); err != nil {
-		return fmt.Errorf("failed to make directory: %w", err)
+		return Backup{}, fmt.Errorf("corrupted datastore: failed to open metadata: %w", err)
 	}
 
-	// open new
-	nf, err := os.OpenFile(filepath.Join(histDirPath, "data.tar.gz"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
+	h, err := hash.FileMD5(filepath.Join(path, "data.tar.gz"))
 	if err != nil {
-		return fmt.Errorf("failed to open new file: %w", err)
-	}
-	defer nf.Close()
-
-	// copy
-	if _, err := io.Copy(nf, f); err != nil {
-		return fmt.Errorf("failed to copy data: %w", err)
+		return Backup{}, fmt.Errorf("corrupted datastore: failed to open metadata: %w", err)
 	}
 
-	return nil
-}
-
-func RestoreArchive(gameID, uuid string) error {
-	histDirPath := filepath.Join(datastorepath, gameID, "hist", uuid)
-	if err := os.MkdirAll(histDirPath, 0740); err != nil {
-		return fmt.Errorf("failed to make directory: %w", err)
-	}
-
-	// open old
-	nf, err := os.OpenFile(filepath.Join(histDirPath, "data.tar.gz"), os.O_RDONLY, 0)
-	if err != nil {
-		return fmt.Errorf("failed to open new file: %w", err)
-	}
-	defer nf.Close()
-
-	path := filepath.Join(datastorepath, gameID, "data.tar.gz")
-
-	// open new
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("failed to open old file: %w", err)
-	}
-	defer f.Close()
-
-	// copy
-	if _, err := io.Copy(f, nf); err != nil {
-		return fmt.Errorf("failed to copy data: %w", err)
-	}
-
-	return nil
-}
-
-func Archive(gameID, uuid string) (Backup, error) {
-	histDirPath := filepath.Join(datastorepath, gameID, "hist", uuid)
-	if err := os.MkdirAll(histDirPath, 0740); err != nil {
-		return Backup{}, fmt.Errorf("failed to make 'hist' directory")
-	}
-
-	finfo, err := os.Stat(histDirPath)
-	if err != nil {
-		return Backup{}, fmt.Errorf("corrupted datastore: %w", err)
-	}
-	archivePath := filepath.Join(histDirPath, "data.tar.gz")
-
-	h, err := hash.FileMD5(archivePath)
-	if err != nil {
-		return Backup{}, fmt.Errorf("failed to calculate md5 hash: %w", err)
-	}
-
-	b := Backup{
-		CreatedAt:   finfo.ModTime(),
-		UUID:        filepath.Base(finfo.Name()),
+	return Backup{
+		CreatedAt:   fs.ModTime(),
 		MD5:         h,
-		ArchivePath: archivePath,
-	}
-
-	return b, nil
+		UUID:        id.backupID,
+		ArchivePath: filepath.Join(path, "data.tar.gz"),
+	}, nil
 }
 
-func Archives(gameID string) ([]Backup, error) {
-	histDirPath := filepath.Join(datastorepath, gameID, "hist")
-	if err := os.MkdirAll(histDirPath, 0740); err != nil {
-		return nil, fmt.Errorf("failed to make 'hist' directory")
-	}
+func (l *LazyRepository) LastScan(id GameIdentifier) (time.Time, error) {
+	path := l.DataPath(id)
 
-	d, err := os.ReadDir(histDirPath)
+	data, err := os.ReadFile(filepath.Join(path, ".last_run"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to open 'hist' directory")
+		if errors.Is(err, os.ErrNotExist) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("failed to reading state file: %w", err)
 	}
 
-	var res []Backup
-	for _, f := range d {
-		finfo, err := f.Info()
+	lastRun, err := time.Parse(time.RFC3339, string(data))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing state file timestamp: %w", err)
+	}
+
+	return lastRun, nil
+}
+
+func (l *LazyRepository) ResetLastScan(id GameIdentifier) error {
+	path := l.DataPath(id)
+
+	f, err := os.OpenFile(filepath.Join(path, ".last_run"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer f.Close()
+
+	data := time.Now().Format(time.RFC3339)
+
+	if _, err := f.WriteString(data); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
+}
+
+func (l *LazyRepository) ReadBlob(id Identifier) (io.Reader, error) {
+	path := l.DataPath(id)
+
+	dst, err := os.OpenFile(filepath.Join(path, "data.tar.gz"), os.O_RDONLY, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open blob: %w", err)
+	}
+
+	return dst, nil
+}
+
+func (l *LazyRepository) SetRemote(id GameIdentifier, url string) error {
+	path := l.DataPath(id)
+
+	src, err := os.OpenFile(filepath.Join(path, "remote.json"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
+	if err != nil {
+		return fmt.Errorf("failed to open remote description: %w", err)
+	}
+	defer src.Close()
+
+	var r Remote
+	r.URL = url
+
+	e := json.NewEncoder(src)
+	if err := e.Encode(r); err != nil {
+		return fmt.Errorf("failed to marshall remote description: %w", err)
+	}
+
+	return nil
+}
+
+func (l *LazyRepository) Remote(id GameIdentifier) (*Remote, error) {
+	path := l.DataPath(id)
+
+	src, err := os.OpenFile(filepath.Join(path, "remote.json"), os.O_RDONLY, 0)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to open remote description: %w", err)
+	}
+	defer src.Close()
+
+	var r Remote
+	e := json.NewDecoder(src)
+	if err := e.Decode(&r); err != nil {
+		return nil, fmt.Errorf("failed to marshall remote description: %w", err)
+	}
+
+	return &r, nil
+}
+
+func (l *LazyRepository) Remove(id GameIdentifier) error {
+	path := l.DataPath(id)
+
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("failed to remove game folder from the datastore: %w", err)
+	}
+
+	return nil
+}
+
+func (r *LazyRepository) DataPath(id Identifier) string {
+	switch identifier := id.(type) {
+	case GameIdentifier:
+		return filepath.Join(r.dataRoot, identifier.gameID)
+	case BackupIdentifier:
+		return filepath.Join(r.dataRoot, identifier.gameID, "hist", identifier.backupID)
+	}
+
+	panic("identifier type not supported")
+}
+
+func NewEagerRepository(dataRootPath string) (*EagerRepository, error) {
+	r, err := NewLazyRepository(dataRootPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return &EagerRepository{
+		Repository: r,
+		data:       make(map[string]Data),
+	}, nil
+}
+
+func (r *EagerRepository) Preload() error {
+	games, err := r.Repository.All()
+	if err != nil {
+		return fmt.Errorf("failed to load all data: %w", err)
+	}
+
+	for _, g := range games {
+		backup, err := r.Repository.AllHist(NewGameIdentifier(g))
 		if err != nil {
-			return nil, fmt.Errorf("corrupted datastore: %w", err)
+			return fmt.Errorf("[%s] failed to load hist data: %w", g, err)
 		}
-		path := filepath.Join(histDirPath, finfo.Name())
-		archivePath := filepath.Join(path, "data.tar.gz")
 
-		h, err := hash.FileMD5(archivePath)
+		remote, err := r.Repository.Remote(NewGameIdentifier(g))
 		if err != nil {
-			return nil, fmt.Errorf("failed to calculate md5 hash: %w", err)
+			return fmt.Errorf("[%s] failed to load remote metadata: %w", g, err)
 		}
 
-		b := Backup{
-			CreatedAt:   finfo.ModTime(),
-			UUID:        filepath.Base(finfo.Name()),
-			MD5:         h,
-			ArchivePath: archivePath,
+		m, err := r.Repository.Metadata(NewGameIdentifier(g))
+		if err != nil {
+			return fmt.Errorf("[%s] failed to load metadata: %w", g, err)
 		}
 
-		res = append(res, b)
+		backups := make(map[string]Backup)
+		for _, b := range backup {
+			info, err := r.Repository.Backup(NewBackupIdentifier(g, b))
+			if err != nil {
+				return fmt.Errorf("[%s] failed to get backup information: %w", g, err)
+			}
+
+			backups[b] = info
+		}
+
+		r.data[g] = Data{
+			Metadata: m,
+			Remote:   remote,
+			DataPath: r.DataPath(NewGameIdentifier(g)),
+			Backup:   backups,
+		}
+	}
+
+	return nil
+}
+
+func (r *EagerRepository) All() ([]string, error) {
+	var res []string
+	for _, g := range r.data {
+		res = append(res, g.Metadata.ID)
+	}
+
+	return res, nil
+}
+
+func (r *EagerRepository) AllHist(id GameIdentifier) ([]string, error) {
+	var res []string
+	if d, ok := r.data[id.gameID]; ok {
+		for _, b := range d.Backup {
+			res = append(res, b.UUID)
+		}
 	}
 	return res, nil
 }
 
-func DatastorePath() string {
-	return datastorepath
-}
-
-func Remove(gameID string) error {
-	err := os.RemoveAll(filepath.Join(datastorepath, gameID))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func Hash(gameID string) (string, error) {
-	path := filepath.Join(datastorepath, gameID, "data.tar.gz")
-
-	return hash.FileMD5(path)
-}
-
-func Version(gameID string) (int, error) {
-	path := filepath.Join(datastorepath, gameID, "metadata.json")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	var metadata Metadata
-	d := json.NewDecoder(f)
-	err = d.Decode(&metadata)
-	if err != nil {
-		return 0, err
-	}
-
-	return metadata.Version, nil
-}
-
-func SetVersion(gameID string, version int) error {
-	path := filepath.Join(datastorepath, gameID, "metadata.json")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+func (r *EagerRepository) WriteMetadata(id GameIdentifier, m Metadata) error {
+	err := r.Repository.WriteMetadata(id, m)
 	if err != nil {
 		return err
 	}
 
-	var metadata Metadata
-	d := json.NewDecoder(f)
-	err = d.Decode(&metadata)
-	if err != nil {
-		f.Close()
-		return err
-	}
-
-	f.Close()
-
-	metadata.Version = version
-
-	f, err = os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0740)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	e := json.NewEncoder(f)
-	err = e.Encode(metadata)
-	if err != nil {
-		return err
-	}
+	d := r.data[id.gameID]
+	d.Metadata = m
+	r.data[id.gameID] = d
 
 	return nil
 }
 
-func SetDate(gameID string, dt time.Time) error {
-	path := filepath.Join(datastorepath, gameID, "metadata.json")
+func (r *EagerRepository) Metadata(id GameIdentifier) (Metadata, error) {
+	if d, ok := r.data[id.gameID]; ok {
+		return d.Metadata, nil
+	}
+	return Metadata{}, ErrNotFound
+}
 
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+func (r *EagerRepository) Backup(id BackupIdentifier) (Backup, error) {
+	if d, ok := r.data[id.gameID]; ok {
+		if b, ok := d.Backup[id.backupID]; ok {
+			return b, nil
+		}
+	}
+	return Backup{}, ErrNotFound
+}
+
+func (r *EagerRepository) SetRemote(id GameIdentifier, url string) error {
+	err := r.Repository.SetRemote(id, url)
 	if err != nil {
 		return err
 	}
 
-	var metadata Metadata
-	d := json.NewDecoder(f)
-	err = d.Decode(&metadata)
-	if err != nil {
-		f.Close()
+	d := r.data[id.gameID]
+	d.Remote = &Remote{
+		URL:    url,
+		GameID: d.Metadata.ID,
+	}
+	r.data[id.gameID] = d
+
+	return nil
+}
+
+func (r *EagerRepository) Remove(id GameIdentifier) error {
+	if err := r.Repository.Remove(id); err != nil {
 		return err
 	}
 
-	f.Close()
-
-	metadata.Date = dt
-
-	f, err = os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0740)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	e := json.NewEncoder(f)
-	err = e.Encode(metadata)
-	if err != nil {
-		return err
-	}
-
+	delete(r.data, id.gameID)
 	return nil
 }

@@ -276,15 +276,16 @@ func (c *Client) PullBackup(gameID, uuid, archivePath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
-	defer f.Close()
 
 	res, err := cli.Do(req)
 	if err != nil {
+		f.Close()
 		return fmt.Errorf("cannot connect to remote: %w", err)
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
+		f.Close()
 		return fmt.Errorf("cannot connect to remote: server return code: %s", res.Status)
 	}
 
@@ -295,8 +296,10 @@ func (c *Client) PullBackup(gameID, uuid, archivePath string) error {
 	defer bar.Close()
 
 	if _, err := io.Copy(io.MultiWriter(f, bar), res.Body); err != nil {
+		f.Close()
 		return fmt.Errorf("an error occured while copying the file from the remote: %w", err)
 	}
+	f.Close()
 
 	if err := os.Rename(archivePath+".part", archivePath); err != nil {
 		return fmt.Errorf("failed to move temporary data: %w", err)
