@@ -51,7 +51,7 @@ func main() {
 	subcommands.Register(&remove.RemoveCmd{Service: s}, "management")
 	subcommands.Register(&show.ShowCmd{Service: s}, "management")
 
-	subcommands.Register(&apply.ListCmd{Service: s}, "restore")
+	subcommands.Register(&apply.ApplyCmd{Service: s}, "restore")
 
 	subcommands.Register(&remote.RemoteCmd{Service: s}, "remote")
 	subcommands.Register(&sync.SyncCmd{Service: s}, "remote")

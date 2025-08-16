@@ -11,24 +11,24 @@ import (
 )
 
 type (
-	ListCmd struct {
+	ApplyCmd struct {
 		Service *data.Service
 	}
 )
 
-func (*ListCmd) Name() string     { return "apply" }
-func (*ListCmd) Synopsis() string { return "apply a backup" }
-func (*ListCmd) Usage() string {
+func (*ApplyCmd) Name() string     { return "apply" }
+func (*ApplyCmd) Synopsis() string { return "apply a backup" }
+func (*ApplyCmd) Usage() string {
 	return `Usage: cloudsave apply <GAME_ID> [BACKUP_ID]
 
 Apply a backup
 `
 }
 
-func (p *ListCmd) SetFlags(f *flag.FlagSet) {
+func (p *ApplyCmd) SetFlags(f *flag.FlagSet) {
 }
 
-func (p *ListCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
+func (p *ApplyCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
 	if f.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "error: missing game ID and/or backup uuid")
 		return subcommands.ExitUsageError
