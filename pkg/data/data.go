@@ -354,7 +354,7 @@ func (l Service) ApplyCurrent(gameID string) error {
 		return err
 	}
 
-	return l.apply(path, g.Path)
+	return l.apply(filepath.Join(path, "data.tar.gz"), g.Path)
 }
 
 func (l Service) ApplyBackup(gameID, backupID string) error {
@@ -367,7 +367,7 @@ func (l Service) ApplyBackup(gameID, backupID string) error {
 		return err
 	}
 
-	return l.apply(path, g.Path)
+	return l.apply(filepath.Join(path, "data.tar.gz"), g.Path)
 }
 
 func (l Service) apply(src, dst string) error {

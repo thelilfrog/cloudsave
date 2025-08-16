@@ -8,6 +8,7 @@ import (
 	"cloudsave/cmd/cli/commands/remote"
 	"cloudsave/cmd/cli/commands/remove"
 	"cloudsave/cmd/cli/commands/run"
+	"cloudsave/cmd/cli/commands/show"
 	"cloudsave/cmd/cli/commands/sync"
 	"cloudsave/cmd/cli/commands/version"
 	"cloudsave/pkg/data"
@@ -48,6 +49,7 @@ func main() {
 	subcommands.Register(&run.RunCmd{Service: s}, "management")
 	subcommands.Register(&list.ListCmd{Service: s}, "management")
 	subcommands.Register(&remove.RemoveCmd{Service: s}, "management")
+	subcommands.Register(&show.ShowCmd{Service: s}, "management")
 
 	subcommands.Register(&apply.ListCmd{Service: s}, "restore")
 
