@@ -344,3 +344,42 @@ func (l Service) CopyBackup(gameID, backupID string, src io.Reader) error {
 
 	return nil
 }
+
+func (l Service) ApplyCurrent(gameID string) error {
+	id := repository.NewGameIdentifier(gameID)
+	path := l.repo.DataPath(id)
+
+	g, err := l.repo.Metadata(id)
+	if err != nil {
+		return err
+	}
+
+	return l.apply(path, g.Path)
+}
+
+func (l Service) ApplyBackup(gameID, backupID string) error {
+	id := repository.NewGameIdentifier(gameID)
+	fullID := repository.NewBackupIdentifier(gameID, backupID)
+	path := l.repo.DataPath(fullID)
+
+	g, err := l.repo.Metadata(id)
+	if err != nil {
+		return err
+	}
+
+	return l.apply(path, g.Path)
+}
+
+func (l Service) apply(src, dst string) error {
+	if err := os.RemoveAll(dst); err != nil {
+		return fmt.Errorf("failed to remove old save: %w", err)
+	}
+
+	f, err := os.OpenFile(src, os.O_RDONLY, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open archive: %w", err)
+	}
+	defer f.Close()
+
+	return archive.Untar(f, dst)
+}
