@@ -36,7 +36,7 @@ func (s *Service) Add(name, path, remote string) (string, error) {
 		ID:      gameID.Key(),
 		Name:    name,
 		Path:    path,
-		Version: 1,
+		Version: 0,
 		Date:    time.Now(),
 	}
 
@@ -267,6 +267,8 @@ func (l Service) PullBackup(gameID, backupID string, cli *client.Client) error {
 	if err := cli.PullBackup(gameID, backupID, archivePath); err != nil {
 		return fmt.Errorf("failed to pull backup: %w", err)
 	}
+
+	
 
 	return nil
 }

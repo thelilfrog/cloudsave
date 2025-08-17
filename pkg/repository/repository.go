@@ -213,6 +213,13 @@ func (l *LazyRepository) Metadata(id GameIdentifier) (Metadata, error) {
 		return Metadata{}, fmt.Errorf("corrupted datastore: failed to parse metadata: %w", err)
 	}
 
+	if _, err := os.Stat(filepath.Join(path, "data.tar.gz")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return m, nil
+		}
+		return Metadata{}, fmt.Errorf("failed to open archive: %w", err)
+	}
+
 	m.MD5, err = hash.FileMD5(filepath.Join(path, "data.tar.gz"))
 	if err != nil {
 		return Metadata{}, fmt.Errorf("failed to calculate md5: %w", err)

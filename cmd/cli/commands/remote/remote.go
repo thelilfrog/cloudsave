@@ -78,7 +78,7 @@ func (p *RemoteCmd) print() error {
 	for _, g := range games {
 		r, err := remote.One(g.ID)
 		if err != nil {
-			return fmt.Errorf("failed to load datastore: %w", err)
+			continue
 		}
 
 		cli := client.New(r.URL, "", "")

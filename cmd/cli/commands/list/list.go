@@ -71,7 +71,9 @@ func (p *ListCmd) local(includeBackup bool) error {
 	for _, g := range games {
 		fmt.Println("ID:", g.ID)
 		fmt.Println("Name:", g.Name)
-		fmt.Println("Last Version:", g.Date, "( Version Number", g.Version, ")")
+		fmt.Println("Last Version:", g.Date)
+		fmt.Println("Version:", g.Version)
+		fmt.Println("MD5:", g.MD5)
 		if includeBackup {
 			bk, err := p.Service.AllBackups(g.ID)
 			if err != nil {
@@ -108,7 +110,9 @@ func (p *ListCmd) server(url, username, password string, includeBackup bool) err
 	for _, g := range games {
 		fmt.Println("ID:", g.ID)
 		fmt.Println("Name:", g.Name)
-		fmt.Println("Last Version:", g.Date, "( Version Number", g.Version, ")")
+		fmt.Println("Last Version:", g.Date)
+		fmt.Println("Version:", g.Version)
+		fmt.Println("MD5:", g.MD5)
 		if includeBackup {
 			bk, err := cli.ListArchives(g.ID)
 			if err != nil {
