@@ -459,6 +459,12 @@ func (r *EagerRepository) WriteMetadata(id GameIdentifier, m Metadata) error {
 		return err
 	}
 
+	// reload from disk because md5
+	m, err = r.Repository.Metadata(id)
+	if err != nil {
+		return err
+	}
+
 	d := r.data[id.gameID]
 	d.Metadata = m
 	r.data[id.gameID] = d

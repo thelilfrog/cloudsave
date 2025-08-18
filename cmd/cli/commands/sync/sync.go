@@ -66,7 +66,6 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			pg.Finish()
 			pg.Clear()
 			pg.Close()
-
 		}
 
 		pg.Describe(fmt.Sprintf("[%s] Checking status...", g.Name))
@@ -88,6 +87,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 				destroyPg()
 				slog.Warn("failed to push backup files", "err", err)
 			}
+			destroyPg()
 			fmt.Println(g.Name + ": pushed")
 			continue
 		}

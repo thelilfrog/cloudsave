@@ -82,47 +82,51 @@ func (s *Service) UpdateMetadata(gameID string, m repository.Metadata) error {
 	return nil
 }
 
-func (s *Service) Scan(gameID string) error {
+func (s *Service) Scan(gameID string) (bool, error) {
 	id := repository.NewGameIdentifier(gameID)
 
 	lastRun, err := s.repo.LastScan(id)
 	if err != nil {
-		return fmt.Errorf("failed to get last scan time: %w", err)
+		return false, fmt.Errorf("failed to get last scan time: %w", err)
 	}
 
 	m, err := s.repo.Metadata(id)
 	if err != nil {
-		return fmt.Errorf("failed to get game metadata: %w", err)
+		return false, fmt.Errorf("failed to get game metadata: %w", err)
 	}
 
 	if !IsDirectoryChanged(m.Path, lastRun) {
-		return nil
+		return false, nil
+	}
+
+	if err := s.MakeBackup(gameID); err != nil {
+		return false, fmt.Errorf("failed to make the backup: %w", err)
 	}
 
 	f, err := s.repo.WriteBlob(id)
 	if err != nil {
-		return fmt.Errorf("failed to get datastore stream: %w", err)
+		return false, fmt.Errorf("failed to get datastore stream: %w", err)
 	}
 	if v, ok := f.(io.Closer); ok {
 		defer v.Close()
 	}
 
 	if err := archive.Tar(f, m.Path); err != nil {
-		return fmt.Errorf("failed to make archive: %w", err)
+		return false, fmt.Errorf("failed to make archive: %w", err)
 	}
 
 	if err := s.repo.ResetLastScan(id); err != nil {
-		return fmt.Errorf("failed to reset scan date: %w", err)
+		return false, fmt.Errorf("failed to reset scan date: %w", err)
 	}
 
 	m.Date = time.Now()
 	m.Version += 1
 
 	if err := s.repo.WriteMetadata(id, m); err != nil {
-		return fmt.Errorf("failed to update metadata: %w", err)
+		return false, fmt.Errorf("failed to update metadata: %w", err)
 	}
 
-	return nil
+	return true, nil
 }
 
 func (s *Service) MakeBackup(gameID string) error {

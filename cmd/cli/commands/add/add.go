@@ -56,7 +56,7 @@ func (p *AddCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) s
 		return subcommands.ExitFailure
 	}
 
-	if err := p.Service.Scan(gameID); err != nil {
+	if _, err := p.Service.Scan(gameID); err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to scan:", err)
 		return subcommands.ExitFailure
 	}
