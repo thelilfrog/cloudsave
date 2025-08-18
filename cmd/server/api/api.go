@@ -164,6 +164,12 @@ func (s HTTPServer) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.Service.ReloadCache(id); err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to reload data from the disk:", err)
+		internalServerError(w, r)
+		return
+	}
+
 	// Respond success
 	w.WriteHeader(http.StatusCreated)
 }
@@ -215,7 +221,13 @@ func (s HTTPServer) histUpload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	if err := s.Service.CopyBackup(gameID, uuid, file); err != nil {
-		fmt.Fprintln(os.Stderr, "error: failed to write data to disk:", err)
+		fmt.Fprintln(os.Stderr, "error: failed to write data to the disk:", err)
+		internalServerError(w, r)
+		return
+	}
+
+	if err := s.Service.ReloadCache(gameID); err != nil {
+		fmt.Fprintln(os.Stderr, "error: failed to reload data from the disk:", err)
 		internalServerError(w, r)
 		return
 	}
@@ -270,7 +282,6 @@ func (s HTTPServer) histExists(w http.ResponseWriter, r *http.Request) {
 
 	ok(finfo, w, r)
 }
-
 
 func (s HTTPServer) metadata(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

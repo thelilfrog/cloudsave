@@ -474,12 +474,6 @@ func (r *EagerRepository) WriteMetadata(id GameIdentifier, m Metadata) error {
 		return err
 	}
 
-	// reload from disk because of md5
-	m, err = r.Repository.Metadata(id)
-	if err != nil {
-		return err
-	}
-
 	d := r.data[id.gameID]
 	d.Metadata = m
 	r.data[id.gameID] = d
@@ -537,5 +531,41 @@ func (r *EagerRepository) Remove(id GameIdentifier) error {
 	}
 
 	delete(r.data, id.gameID)
+	return nil
+}
+
+func (r *EagerRepository) ReloadMetadata(id GameIdentifier) error {
+	backup, err := r.Repository.AllHist(id)
+	if err != nil {
+		return fmt.Errorf("[%s] failed to load hist data: %w", id, err)
+	}
+
+	remote, err := r.Repository.Remote(id)
+	if err != nil {
+		return fmt.Errorf("[%s] failed to load remote metadata: %w", id, err)
+	}
+
+	m, err := r.Repository.Metadata(id)
+	if err != nil {
+		return fmt.Errorf("[%s] failed to load metadata: %w", id, err)
+	}
+
+	backups := make(map[string]Backup)
+	for _, b := range backup {
+		info, err := r.Repository.Backup(NewBackupIdentifier(id.gameID, b))
+		if err != nil {
+			return fmt.Errorf("[%s] failed to get backup information: %w", id, err)
+		}
+
+		backups[b] = info
+	}
+
+	r.data[id.gameID] = Data{
+		Metadata: m,
+		Remote:   remote,
+		DataPath: r.DataPath(id),
+		Backup:   backups,
+	}
+
 	return nil
 }

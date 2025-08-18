@@ -378,6 +378,13 @@ func (l Service) Repository() repository.Repository {
 	return l.repo
 }
 
+func (l Service) ReloadCache(gameID string) error {
+	if er, ok := l.repo.(*repository.EagerRepository); ok {
+		return er.ReloadMetadata(repository.NewGameIdentifier(gameID))
+	}
+	return nil
+}
+
 func (l Service) apply(src, dst string) error {
 	if err := os.RemoveAll(dst); err != nil {
 		return fmt.Errorf("failed to remove old save: %w", err)
