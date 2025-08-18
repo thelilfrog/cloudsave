@@ -3,13 +3,13 @@ package api
 import (
 	"cloudsave/pkg/remote/obj"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 )
 
 func internalServerError(w http.ResponseWriter, r *http.Request) {
-	e := obj.HTTPError{
+	payload := obj.HTTPError{
 		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusInternalServerError,
 			Path:      r.RequestURI,
@@ -19,20 +19,16 @@ func internalServerError(w http.ResponseWriter, r *http.Request) {
 		Message: "The server encountered an unexpected condition that prevented it from fulfilling the request.",
 	}
 
-	payload, err := json.Marshal(e)
-	if err != nil {
-		log.Println(err)
-	}
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusInternalServerError)
-	_, err = w.Write(payload)
-	if err != nil {
-		log.Println(err)
+	e := json.NewEncoder(w)
+	if err := e.Encode(payload); err != nil {
+		slog.Error(err.Error())
 	}
 }
 
 func notFound(message string, w http.ResponseWriter, r *http.Request) {
-	e := obj.HTTPError{
+	payload := obj.HTTPError{
 		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusNotFound,
 			Path:      r.RequestURI,
@@ -42,20 +38,16 @@ func notFound(message string, w http.ResponseWriter, r *http.Request) {
 		Message: message,
 	}
 
-	payload, err := json.Marshal(e)
-	if err != nil {
-		log.Println(err)
-	}
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
-	_, err = w.Write(payload)
-	if err != nil {
-		log.Println(err)
+	e := json.NewEncoder(w)
+	if err := e.Encode(payload); err != nil {
+		slog.Error(err.Error())
 	}
 }
 
 func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
-	e := obj.HTTPError{
+	payload := obj.HTTPError{
 		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusMethodNotAllowed,
 			Path:      r.RequestURI,
@@ -65,20 +57,16 @@ func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 		Message: "The server knows the request method, but the target resource doesn't support this method",
 	}
 
-	payload, err := json.Marshal(e)
-	if err != nil {
-		log.Println(err)
-	}
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusMethodNotAllowed)
-	_, err = w.Write(payload)
-	if err != nil {
-		log.Println(err)
+	e := json.NewEncoder(w)
+	if err := e.Encode(payload); err != nil {
+		slog.Error(err.Error())
 	}
 }
 
 func unauthorized(w http.ResponseWriter, r *http.Request) {
-	e := obj.HTTPError{
+	payload := obj.HTTPError{
 		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusUnauthorized,
 			Path:      r.RequestURI,
@@ -88,21 +76,17 @@ func unauthorized(w http.ResponseWriter, r *http.Request) {
 		Message: "The request has not been completed because it lacks valid authentication credentials for the requested resource.",
 	}
 
-	payload, err := json.Marshal(e)
-	if err != nil {
-		log.Println(err)
-	}
 	w.Header().Add("Content-Type", "application/json")
 	w.Header().Add("WWW-Authenticate", "Custom realm=\"loginUserHandler via /api/login\"")
 	w.WriteHeader(http.StatusUnauthorized)
-	_, err = w.Write(payload)
-	if err != nil {
-		log.Println(err)
+	e := json.NewEncoder(w)
+	if err := e.Encode(payload); err != nil {
+		slog.Error(err.Error())
 	}
 }
 
 func ok(o interface{}, w http.ResponseWriter, r *http.Request) {
-	e := obj.HTTPObject{
+	payload := obj.HTTPObject{
 		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusOK,
 			Path:      r.RequestURI,
@@ -110,20 +94,15 @@ func ok(o interface{}, w http.ResponseWriter, r *http.Request) {
 		},
 		Data: o,
 	}
-
-	payload, err := json.Marshal(e)
-	if err != nil {
-		log.Println(err)
-	}
 	w.Header().Add("Content-Type", "application/json")
-	_, err = w.Write(payload)
-	if err != nil {
-		log.Println(err)
+	e := json.NewEncoder(w)
+	if err := e.Encode(payload); err != nil {
+		slog.Error(err.Error())
 	}
 }
 
 func badRequest(message string, w http.ResponseWriter, r *http.Request) {
-	e := obj.HTTPError{
+	payload := obj.HTTPError{
 		HTTPCore: obj.HTTPCore{
 			Status:    http.StatusBadRequest,
 			Path:      r.RequestURI,
@@ -133,14 +112,10 @@ func badRequest(message string, w http.ResponseWriter, r *http.Request) {
 		Message: message,
 	}
 
-	payload, err := json.Marshal(e)
-	if err != nil {
-		log.Println(err)
-	}
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
-	_, err = w.Write(payload)
-	if err != nil {
-		log.Println(err)
+	e := json.NewEncoder(w)
+	if err := e.Encode(payload); err != nil {
+		slog.Error(err.Error())
 	}
 }

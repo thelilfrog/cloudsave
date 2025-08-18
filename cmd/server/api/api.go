@@ -3,7 +3,6 @@ package api
 import (
 	"cloudsave/pkg/data"
 	"cloudsave/pkg/repository"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -36,7 +35,7 @@ func NewServer(documentRoot string, srv *data.Service, creds map[string]string, 
 	}
 	router := chi.NewRouter()
 	router.NotFound(func(writer http.ResponseWriter, request *http.Request) {
-		notFound("This route does not exist", writer, request)
+		notFound("id not found", writer, request)
 	})
 	router.MethodNotAllowed(func(writer http.ResponseWriter, request *http.Request) {
 		methodNotAllowed(writer, request)
@@ -81,41 +80,11 @@ func NewServer(documentRoot string, srv *data.Service, creds map[string]string, 
 }
 
 func (s HTTPServer) all(w http.ResponseWriter, r *http.Request) {
-	path := filepath.Join(s.documentRoot, "data")
-	datastore := make([]repository.Metadata, 0)
-
-	if _, err := os.Stat(path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			ok(datastore, w, r)
-			return
-		}
-		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
-		internalServerError(w, r)
-		return
-	}
-
-	ds, err := os.ReadDir(path)
+	datastore, err := s.Service.AllGames()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "failed to open datastore (", s.documentRoot, "):", err)
+		slog.Error(err.Error())
 		internalServerError(w, r)
 		return
-	}
-
-	for _, d := range ds {
-		content, err := os.ReadFile(filepath.Join(path, d.Name(), "metadata.json"))
-		if err != nil {
-			slog.Error("error: failed to load metadata.json", "err", err)
-			continue
-		}
-
-		var m repository.Metadata
-		err = json.Unmarshal(content, &m)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "corrupted datastore: failed to parse %s/metadata.json: %s", d.Name(), err)
-			internalServerError(w, r)
-		}
-
-		datastore = append(datastore, m)
 	}
 
 	ok(datastore, w, r)
@@ -125,32 +94,19 @@ func (s HTTPServer) download(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id))
 
-	sdir, err := os.Stat(path)
+	fi, err := os.Stat(filepath.Join(path, "data.tar.gz"))
 	if err != nil {
 		notFound("id not found", w, r)
 		return
 	}
 
-	if !sdir.IsDir() {
-		notFound("id not found", w, r)
-		return
-	}
-
-	path = filepath.Join(path, "data.tar.gz")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	f, err := s.Service.Repository().ReadBlob(repository.NewGameIdentifier(id))
 	if err != nil {
-		notFound("id not found", w, r)
-		return
-	}
-	defer f.Close()
-
-	// Get file info to set headers
-	fi, err := f.Stat()
-	if err != nil || fi.IsDir() {
+		slog.Error(err.Error())
 		internalServerError(w, r)
 		return
 	}
+	defer f.Close()
 
 	// Set headers
 	w.Header().Set("Content-Disposition", "attachment; filename=\"data.tar.gz\"")
@@ -274,32 +230,19 @@ func (s HTTPServer) histDownload(w http.ResponseWriter, r *http.Request) {
 	uuid := chi.URLParam(r, "uuid")
 	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id, "hist", uuid))
 
-	sdir, err := os.Stat(path)
+	fi, err := os.Stat(filepath.Join(path, "data.tar.gz"))
 	if err != nil {
 		notFound("id not found", w, r)
 		return
 	}
 
-	if !sdir.IsDir() {
-		notFound("id not found", w, r)
-		return
-	}
-
-	path = filepath.Join(path, "data.tar.gz")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	f, err := s.Service.Repository().ReadBlob(repository.NewBackupIdentifier(id, uuid))
 	if err != nil {
-		notFound("id not found", w, r)
-		return
-	}
-	defer f.Close()
-
-	// Get file info to set headers
-	fi, err := f.Stat()
-	if err != nil || fi.IsDir() {
+		slog.Error(err.Error())
 		internalServerError(w, r)
 		return
 	}
+	defer f.Close()
 
 	// Set headers
 	w.Header().Set("Content-Disposition", "attachment; filename=\"data.tar.gz\"")
@@ -348,37 +291,16 @@ func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
 
 func (s HTTPServer) metadata(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	path := filepath.Clean(filepath.Join(s.documentRoot, "data", id))
-
-	sdir, err := os.Stat(path)
+	metadata, err := s.Service.One(id)
 	if err != nil {
-		notFound("id not found", w, r)
-		return
-	}
-
-	if !sdir.IsDir() {
-		notFound("id not found", w, r)
-		return
-	}
-
-	path = filepath.Join(path, "metadata.json")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
-	if err != nil {
-		notFound("id not found", w, r)
-		return
-	}
-	defer f.Close()
-
-	var metadata repository.Metadata
-	d := json.NewDecoder(f)
-	err = d.Decode(&metadata)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: an error occured while reading data:", err)
+		if errors.Is(err, repository.ErrNotFound) {
+			notFound("id not found", w, r)
+			return
+		}
+		slog.Error(err.Error())
 		internalServerError(w, r)
 		return
 	}
-
 	ok(metadata, w, r)
 }
 

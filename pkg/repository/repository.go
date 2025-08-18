@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -74,7 +75,7 @@ type (
 
 		Metadata(gameID GameIdentifier) (Metadata, error)
 		LastScan(gameID GameIdentifier) (time.Time, error)
-		ReadBlob(gameID Identifier) (io.Reader, error)
+		ReadBlob(gameID Identifier) (io.ReadSeekCloser, error)
 		Backup(id BackupIdentifier) (Backup, error)
 		Remote(id GameIdentifier) (*Remote, error)
 
@@ -132,10 +133,16 @@ func NewLazyRepository(dataRootPath string) (*LazyRepository, error) {
 }
 
 func (l *LazyRepository) Mkdir(id Identifier) error {
-	return os.MkdirAll(l.DataPath(id), 0740)
+	path := l.DataPath(id)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		slog.Debug("making directory", "path", path, "id", id, "perm", "0740")
+		return os.MkdirAll(path, 0740)
+	}
+	return nil
 }
 
 func (l *LazyRepository) All() ([]string, error) {
+	slog.Debug("loading all current data...")
 	dir, err := os.ReadDir(l.dataRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open directory: %w", err)
@@ -152,6 +159,7 @@ func (l *LazyRepository) All() ([]string, error) {
 func (l *LazyRepository) AllHist(id GameIdentifier) ([]string, error) {
 	path := l.DataPath(id)
 
+	slog.Debug("loading hist data...", "id", id)
 	dir, err := os.ReadDir(filepath.Join(path, "hist"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -171,6 +179,7 @@ func (l *LazyRepository) AllHist(id GameIdentifier) ([]string, error) {
 func (l *LazyRepository) WriteBlob(ID Identifier) (io.Writer, error) {
 	path := l.DataPath(ID)
 
+	slog.Debug("loading write buffer...", "id", ID)
 	dst, err := os.OpenFile(filepath.Join(path, "data.tar.gz"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open destination file: %w", err)
@@ -182,6 +191,7 @@ func (l *LazyRepository) WriteBlob(ID Identifier) (io.Writer, error) {
 func (l *LazyRepository) WriteMetadata(id GameIdentifier, m Metadata) error {
 	path := l.DataPath(id)
 
+	slog.Debug("writing metadata", "id", id, "metadata", m)
 	dst, err := os.OpenFile(filepath.Join(path, "metadata.json"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
 	if err != nil {
 		return fmt.Errorf("failed to open destination file: %w", err)
@@ -199,6 +209,7 @@ func (l *LazyRepository) WriteMetadata(id GameIdentifier, m Metadata) error {
 func (l *LazyRepository) Metadata(id GameIdentifier) (Metadata, error) {
 	path := l.DataPath(id)
 
+	slog.Debug("loading metadata", "id", id)
 	src, err := os.OpenFile(filepath.Join(path, "metadata.json"), os.O_RDONLY, 0)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -220,6 +231,7 @@ func (l *LazyRepository) Metadata(id GameIdentifier) (Metadata, error) {
 		return Metadata{}, fmt.Errorf("failed to open archive: %w", err)
 	}
 
+	slog.Debug("loading md5 hash", "id", id)
 	m.MD5, err = hash.FileMD5(filepath.Join(path, "data.tar.gz"))
 	if err != nil {
 		return Metadata{}, fmt.Errorf("failed to calculate md5: %w", err)
@@ -231,6 +243,7 @@ func (l *LazyRepository) Metadata(id GameIdentifier) (Metadata, error) {
 func (l *LazyRepository) Backup(id BackupIdentifier) (Backup, error) {
 	path := l.DataPath(id)
 
+	slog.Debug("loading hist metadata", "id", id)
 	fs, err := os.Stat(filepath.Join(path, "data.tar.gz"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -239,6 +252,7 @@ func (l *LazyRepository) Backup(id BackupIdentifier) (Backup, error) {
 		return Backup{}, fmt.Errorf("corrupted datastore: failed to open metadata: %w", err)
 	}
 
+	slog.Debug("loading md5 hash", "id", id)
 	h, err := hash.FileMD5(filepath.Join(path, "data.tar.gz"))
 	if err != nil {
 		return Backup{}, fmt.Errorf("corrupted datastore: failed to open metadata: %w", err)
@@ -274,6 +288,7 @@ func (l *LazyRepository) LastScan(id GameIdentifier) (time.Time, error) {
 func (l *LazyRepository) ResetLastScan(id GameIdentifier) error {
 	path := l.DataPath(id)
 
+	slog.Debug("resetting last scan datetime for", "id", id)
 	f, err := os.OpenFile(filepath.Join(path, ".last_run"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0740)
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
@@ -289,9 +304,10 @@ func (l *LazyRepository) ResetLastScan(id GameIdentifier) error {
 	return nil
 }
 
-func (l *LazyRepository) ReadBlob(id Identifier) (io.Reader, error) {
+func (l *LazyRepository) ReadBlob(id Identifier) (io.ReadSeekCloser, error) {
 	path := l.DataPath(id)
 
+	slog.Debug("loading read buffer...", "id", id)
 	dst, err := os.OpenFile(filepath.Join(path, "data.tar.gz"), os.O_RDONLY, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open blob: %w", err)
@@ -344,6 +360,7 @@ func (l *LazyRepository) Remote(id GameIdentifier) (*Remote, error) {
 func (l *LazyRepository) Remove(id GameIdentifier) error {
 	path := l.DataPath(id)
 
+	slog.Debug("removing data", "id", id)
 	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("failed to remove game folder from the datastore: %w", err)
 	}

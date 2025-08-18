@@ -268,8 +268,6 @@ func (l Service) PullBackup(gameID, backupID string, cli *client.Client) error {
 		return fmt.Errorf("failed to pull backup: %w", err)
 	}
 
-	
-
 	return nil
 }
 
@@ -370,6 +368,10 @@ func (l Service) ApplyBackup(gameID, backupID string) error {
 	}
 
 	return l.apply(filepath.Join(path, "data.tar.gz"), g.Path)
+}
+
+func (l Service) Repository() repository.Repository {
+	return l.repo
 }
 
 func (l Service) apply(src, dst string) error {
