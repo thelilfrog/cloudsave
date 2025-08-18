@@ -167,6 +167,10 @@ func (c *Client) ListArchives(gameID string) ([]string, error) {
 		return nil, err
 	}
 
+	if o.Data == nil {
+		return nil, nil
+	}
+
 	if m, ok := (o.Data).([]any); ok {
 		var res []string
 		for _, uuid := range m {
@@ -336,6 +340,10 @@ func (c *Client) All() ([]repository.Metadata, error) {
 	o, err := c.get(u)
 	if err != nil {
 		return nil, err
+	}
+
+	if o.Data == nil {
+		return nil, nil
 	}
 
 	if games, ok := (o.Data).([]any); ok {

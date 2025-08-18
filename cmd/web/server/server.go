@@ -162,9 +162,8 @@ func (s *HTTPServer) detailled(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var wg sync.WaitGroup
-	var err1, err2, err3 error
+	var err1, err2 error
 	var save repository.Metadata
-	var h string
 	var ids []string
 
 	wg.Add(1)
@@ -175,24 +174,18 @@ func (s *HTTPServer) detailled(w http.ResponseWriter, r *http.Request) {
 
 	wg.Add(1)
 	go func() {
-		h, err2 = cli.Hash(id)
-		wg.Done()
-	}()
-
-	wg.Add(1)
-	go func() {
-		ids, err3 = cli.ListArchives(id)
+		ids, err2 = cli.ListArchives(id)
 		wg.Done()
 	}()
 
 	wg.Wait()
 
-	if err1 != nil || err2 != nil || err3 != nil {
+	if err1 != nil || err2 != nil {
 		if errors.Is(err1, client.ErrUnauthorized) {
 			unauthorized("Unable to access resources", w, r)
 			return
 		}
-		slog.Error("unable to connect to the remote", "err", err1)
+		slog.Error("failed to get metadata: unable to connect to the remote", "err", err1)
 		return
 	}
 
@@ -205,7 +198,7 @@ func (s *HTTPServer) detailled(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			b, err := cli.ArchiveInfo(id, i)
 			if err != nil {
-				slog.Error("unable to connect to the remote", "err", err)
+				slog.Error("failed to get backup: unable to connect to the remote", "err", err)
 				return
 			}
 			bm = append(bm, b)
@@ -216,7 +209,6 @@ func (s *HTTPServer) detailled(w http.ResponseWriter, r *http.Request) {
 
 	payload := DetaillePayload{
 		Save:           save,
-		Hash:           h,
 		BackupMetadata: bm,
 		Version:        constants.Version,
 	}
