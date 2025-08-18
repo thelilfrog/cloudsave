@@ -60,7 +60,6 @@ func NewServer(documentRoot string, srv *data.Service, creds map[string]string, 
 					gamesRouter.Group(func(saveRouter chi.Router) {
 						saveRouter.Post("/{id}/data", s.upload)
 						saveRouter.Get("/{id}/data", s.download)
-						saveRouter.Get("/{id}/hash", s.hash)
 						saveRouter.Get("/{id}/metadata", s.metadata)
 
 						saveRouter.Get("/{id}/hist", s.allHist)
@@ -272,22 +271,6 @@ func (s HTTPServer) histExists(w http.ResponseWriter, r *http.Request) {
 	ok(finfo, w, r)
 }
 
-func (s HTTPServer) hash(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-
-	m, err := s.Service.One(id)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			notFound("not found", w, r)
-			return
-		}
-		fmt.Fprintln(os.Stderr, "error: an error occured while calculating the hash:", err)
-		internalServerError(w, r)
-		return
-	}
-
-	ok(m.MD5, w, r)
-}
 
 func (s HTTPServer) metadata(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

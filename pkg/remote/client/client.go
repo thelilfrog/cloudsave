@@ -49,7 +49,7 @@ func New(baseURL, username, password string) *Client {
 }
 
 func (c *Client) Exists(gameID string) (bool, error) {
-	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "hash")
+	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "metadata")
 	if err != nil {
 		return false, err
 	}
@@ -104,22 +104,13 @@ func (c *Client) Version() (Information, error) {
 	return Information{}, errors.New("invalid payload sent by the server")
 }
 
+// Deprecated: use c.Metadata instead
 func (c *Client) Hash(gameID string) (string, error) {
-	u, err := url.JoinPath(c.baseURL, "api", "v1", "games", gameID, "hash")
+	m, err := c.Metadata(gameID)
 	if err != nil {
 		return "", err
 	}
-
-	o, err := c.get(u)
-	if err != nil {
-		return "", err
-	}
-
-	if h, ok := (o.Data).(string); ok {
-		return h, nil
-	}
-
-	return "", errors.New("invalid payload sent by the server")
+	return m.MD5, nil
 }
 
 func (c *Client) Metadata(gameID string) (repository.Metadata, error) {
@@ -139,6 +130,7 @@ func (c *Client) Metadata(gameID string) (repository.Metadata, error) {
 			Name:    m["name"].(string),
 			Version: int(m["version"].(float64)),
 			Date:    customtime.MustParse(time.RFC3339, m["date"].(string)),
+			MD5:     m["md5"].(string),
 		}
 		return gm, nil
 	}
@@ -355,6 +347,7 @@ func (c *Client) All() ([]repository.Metadata, error) {
 					Name:    v["name"].(string),
 					Version: int(v["version"].(float64)),
 					Date:    customtime.MustParse(time.RFC3339, v["date"].(string)),
+					MD5:     v["md5"].(string),
 				}
 				res = append(res, gm)
 			}

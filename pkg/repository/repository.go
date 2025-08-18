@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -19,7 +20,7 @@ type (
 		Path    string    `json:"path"`
 		Version int       `json:"version"`
 		Date    time.Time `json:"date"`
-		MD5     string    `json:"-"`
+		MD5     string    `json:"md5,omitempty"`
 	}
 
 	Remote struct {
@@ -61,6 +62,7 @@ type (
 	EagerRepository struct {
 		Repository
 
+		mu   sync.RWMutex
 		data map[string]Data
 	}
 
@@ -189,6 +191,7 @@ func (l *LazyRepository) WriteBlob(ID Identifier) (io.Writer, error) {
 }
 
 func (l *LazyRepository) WriteMetadata(id GameIdentifier, m Metadata) error {
+	m.MD5 = ""
 	path := l.DataPath(id)
 
 	slog.Debug("writing metadata", "id", id, "metadata", m)
@@ -392,6 +395,9 @@ func NewEagerRepository(dataRootPath string) (*EagerRepository, error) {
 }
 
 func (r *EagerRepository) Preload() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	games, err := r.Repository.All()
 	if err != nil {
 		return fmt.Errorf("failed to load all data: %w", err)
@@ -435,6 +441,9 @@ func (r *EagerRepository) Preload() error {
 }
 
 func (r *EagerRepository) All() ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	var res []string
 	for _, g := range r.data {
 		res = append(res, g.Metadata.ID)
@@ -444,6 +453,9 @@ func (r *EagerRepository) All() ([]string, error) {
 }
 
 func (r *EagerRepository) AllHist(id GameIdentifier) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	var res []string
 	if d, ok := r.data[id.gameID]; ok {
 		for _, b := range d.Backup {
@@ -454,12 +466,15 @@ func (r *EagerRepository) AllHist(id GameIdentifier) ([]string, error) {
 }
 
 func (r *EagerRepository) WriteMetadata(id GameIdentifier, m Metadata) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	err := r.Repository.WriteMetadata(id, m)
 	if err != nil {
 		return err
 	}
 
-	// reload from disk because md5
+	// reload from disk because of md5
 	m, err = r.Repository.Metadata(id)
 	if err != nil {
 		return err
@@ -473,6 +488,9 @@ func (r *EagerRepository) WriteMetadata(id GameIdentifier, m Metadata) error {
 }
 
 func (r *EagerRepository) Metadata(id GameIdentifier) (Metadata, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	if d, ok := r.data[id.gameID]; ok {
 		return d.Metadata, nil
 	}
@@ -480,6 +498,9 @@ func (r *EagerRepository) Metadata(id GameIdentifier) (Metadata, error) {
 }
 
 func (r *EagerRepository) Backup(id BackupIdentifier) (Backup, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	if d, ok := r.data[id.gameID]; ok {
 		if b, ok := d.Backup[id.backupID]; ok {
 			return b, nil
@@ -489,6 +510,9 @@ func (r *EagerRepository) Backup(id BackupIdentifier) (Backup, error) {
 }
 
 func (r *EagerRepository) SetRemote(id GameIdentifier, url string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	err := r.Repository.SetRemote(id, url)
 	if err != nil {
 		return err
@@ -505,6 +529,9 @@ func (r *EagerRepository) SetRemote(id GameIdentifier, url string) error {
 }
 
 func (r *EagerRepository) Remove(id GameIdentifier) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if err := r.Repository.Remove(id); err != nil {
 		return err
 	}

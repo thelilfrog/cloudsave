@@ -94,13 +94,6 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 
 		pg.Describe(fmt.Sprintf("[%s] Fetching metadata...", g.Name))
 
-		hremote, err := cli.Hash(r.GameID)
-		if err != nil {
-			destroyPg()
-			fmt.Fprintln(os.Stderr, "error: failed to get the file hash from the remote:", err)
-			continue
-		}
-
 		remoteMetadata, err := cli.Metadata(r.GameID)
 		if err != nil {
 			destroyPg()
@@ -118,7 +111,7 @@ func (p *SyncCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) 
 			slog.Warn("failed to push backup files", "err", err)
 		}
 
-		if g.MD5 == hremote {
+		if g.MD5 == remoteMetadata.MD5 {
 			destroyPg()
 			if g.Version != remoteMetadata.Version {
 				slog.Debug("version is not the same, but the hash is equal. Updating local database")
