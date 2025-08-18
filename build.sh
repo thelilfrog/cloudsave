@@ -47,11 +47,11 @@ for platform in "${platforms[@]}"; do
     fi
 
     if [ "$MAKE_PACKAGE" == "true" ]; then
-        CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_server$EXT -a ./cmd/server
+        CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} GORISCV64=rva22u64 GOAMD64=v3 GOARM64=v8.2 go build -o build/cloudsave_server$EXT -a ./cmd/server
         tar -czf build/server_${platform_split[0]}_${platform_split[1]}.tar.gz build/cloudsave_server$EXT
         rm build/cloudsave_server$EXT
     else
-      CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} go build -o build/cloudsave_server_${platform_split[0]}_${platform_split[1]}$EXT -a ./cmd/server
+      CGO_ENABLED=0 GOOS=${platform_split[0]} GOARCH=${platform_split[1]} GORISCV64=rva22u64 GOAMD64=v3 GOARM64=v8.2 go build -o build/cloudsave_server_${platform_split[0]}_${platform_split[1]}$EXT -a ./cmd/server
     fi
 done
 
