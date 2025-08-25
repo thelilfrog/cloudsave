@@ -4,6 +4,7 @@ import (
 	"cloudsave/pkg/remote/client"
 	"cloudsave/pkg/repository"
 	"cloudsave/pkg/tools/archive"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -134,6 +135,9 @@ func (s *Service) MakeBackup(gameID string) error {
 
 	src, err := s.repo.ReadBlob(id)
 	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil
+		}
 		return err
 	}
 	if v, ok := src.(io.Closer); ok {

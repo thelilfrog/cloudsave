@@ -313,6 +313,9 @@ func (l *LazyRepository) ReadBlob(id Identifier) (io.ReadSeekCloser, error) {
 	slog.Debug("loading read buffer...", "id", id)
 	dst, err := os.OpenFile(filepath.Join(path, "data.tar.gz"), os.O_RDONLY, 0)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("failed to open blob: %w", ErrNotFound)
+		}
 		return nil, fmt.Errorf("failed to open blob: %w", err)
 	}
 
